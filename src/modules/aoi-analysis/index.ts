@@ -1,5 +1,1 @@
-// Módulo: aoi-analysis
-// Estrutura pronta para implementação incremental
-// Exponha aqui apenas as interfaces públicas do módulo
-
-export {}
+export { AoiUploadForm } from "./components/AoiUploadForm"

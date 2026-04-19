@@ -1,5 +1,3 @@
-// Módulo: projects
-// Estrutura pronta para implementação incremental
-// Exponha aqui apenas as interfaces públicas do módulo
-
-export {}
+export { ProjectForm } from "./components/ProjectForm"
+export { StageBoard } from "./components/StageBoard"
+export * from "./schemas"

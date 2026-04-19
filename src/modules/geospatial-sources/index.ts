@@ -1,5 +1,2 @@
-// Módulo: geospatial-sources
-// Estrutura pronta para implementação incremental
-// Exponha aqui apenas as interfaces públicas do módulo
-
-export {}
+export { SeedSourcesButton } from "./components/SeedSourcesButton"
+export * from "./schemas"
