@@ -1,4 +1,7 @@
 import mysql from "mysql2/promise"
+import { drizzle } from "drizzle-orm/mysql2"
+import { migrate } from "drizzle-orm/mysql2/migrator"
+import path from "path"
 
 export interface DbCredentials {
   host: string
@@ -76,6 +79,19 @@ export async function checkDatabaseExists(credentials: DbCredentials): Promise<b
   }
 }
 
+async function runMigrations(credentials: DbCredentials): Promise<void> {
+  const pool = mysql.createPool({
+    host: credentials.host,
+    port: credentials.port,
+    user: credentials.user,
+    password: credentials.password,
+    database: credentials.database,
+  })
+  const db = drizzle(pool)
+  await migrate(db, { migrationsFolder: path.join(process.cwd(), "drizzle") })
+  await pool.end()
+}
+
 export async function createDatabase(credentials: DbCredentials): Promise<void> {
   let conn: mysql.Connection | undefined
   try {
@@ -89,6 +105,7 @@ export async function createDatabase(credentials: DbCredentials): Promise<void> 
   } finally {
     if (conn) await conn.end()
   }
+  await runMigrations(credentials)
 }
 
 export async function dropAndRecreateDatabase(credentials: DbCredentials): Promise<void> {
@@ -105,4 +122,5 @@ export async function dropAndRecreateDatabase(credentials: DbCredentials): Promi
   } finally {
     if (conn) await conn.end()
   }
+  await runMigrations(credentials)
 }
