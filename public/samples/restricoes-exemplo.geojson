@@ -1,0 +1,67 @@
+{
+  "type": "FeatureCollection",
+  "name": "Restrições e Sobreposições - Exemplo",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "nome": "Área Embargada IBAMA #2024-001",
+        "tipo": "embargo",
+        "orgao": "IBAMA",
+        "data": "2024-03-15",
+        "auto": "7648920"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.780, -2.510],
+          [-54.730, -2.510],
+          [-54.730, -2.560],
+          [-54.780, -2.560],
+          [-54.780, -2.510]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 2,
+        "nome": "Terra Indígena Sawré Muybu (buffer)",
+        "tipo": "terra_indigena",
+        "orgao": "FUNAI",
+        "portaria": "1129/2016"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.840, -2.550],
+          [-54.790, -2.550],
+          [-54.790, -2.600],
+          [-54.840, -2.600],
+          [-54.840, -2.550]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3,
+        "nome": "APP - Margem Rio Tapajós",
+        "tipo": "app",
+        "orgao": "SEMAS-PA",
+        "largura_m": 100
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.700, -2.470],
+          [-54.680, -2.470],
+          [-54.680, -2.560],
+          [-54.700, -2.560],
+          [-54.700, -2.470]
+        ]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "type": "FeatureCollection",
+  "name": "Áreas de Floresta - Exemplo",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1,
+        "nome": "Talhão A - Floresta Primária",
+        "area_ha": 312.5,
+        "classe": "Floresta Primária",
+        "car": "PA-1504208-ABCD1234"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.820, -2.480],
+          [-54.760, -2.480],
+          [-54.760, -2.540],
+          [-54.820, -2.540],
+          [-54.820, -2.480]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 2,
+        "nome": "Talhão B - Floresta Secundária",
+        "area_ha": 178.3,
+        "classe": "Floresta Secundária",
+        "car": "PA-1504208-EFGH5678"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.760, -2.480],
+          [-54.700, -2.480],
+          [-54.700, -2.530],
+          [-54.760, -2.530],
+          [-54.760, -2.480]
+        ]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3,
+        "nome": "Talhão C - Área de Regeneração",
+        "area_ha": 95.8,
+        "classe": "Regeneração Natural",
+        "car": "PA-1504208-IJKL9012"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [-54.820, -2.540],
+          [-54.760, -2.540],
+          [-54.760, -2.580],
+          [-54.820, -2.580],
+          [-54.820, -2.540]
+        ]]
+      }
+    }
+  ]
+}
