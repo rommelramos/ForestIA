@@ -1,7 +1,8 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  /* config options here */
-};
+  serverExternalPackages: ["mysql2", "bcryptjs"],
+  outputFileTracingRoot: "/Users/rommelramos/Library/CloudStorage/Dropbox/ufpa/desenvolvimento/GoogleAI/Claude/ForestIA",
+}
 
-export default nextConfig;
+export default nextConfig
