@@ -5,6 +5,7 @@ import { inviteTokens } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { v4 as uuidv4 } from "uuid"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const schema = z.object({
   email: z.string().email().optional(),
@@ -12,7 +13,7 @@ const schema = z.object({
   expiresInDays: z.number().min(1).max(30).default(7),
 })
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || !["admin","gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -38,9 +39,9 @@ export async function POST(req: NextRequest) {
   const inviteUrl = `${baseUrl}/register/${token}`
 
   return NextResponse.json({ success: true, token, inviteUrl, expiresAt })
-}
+})
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session || !["admin","gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -48,4 +49,4 @@ export async function GET() {
   const db = getDb()
   const list = await db.select().from(inviteTokens).orderBy(inviteTokens.createdAt)
   return NextResponse.json(list)
-}
+})

@@ -4,8 +4,9 @@ import { auth } from "../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { projects, projectMembers, users } from "@/lib/db/schema"
 import { projectSchema } from "@/modules/projects/schemas"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
@@ -30,9 +31,9 @@ export async function GET() {
   }
 
   return NextResponse.json(list)
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -62,4 +63,4 @@ export async function POST(req: NextRequest) {
   }).$returningId()
 
   return NextResponse.json({ success: true, id: result.id }, { status: 201 })
-}
+})

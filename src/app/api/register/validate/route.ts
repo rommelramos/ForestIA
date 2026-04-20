@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { getDb } from "@/lib/db/drizzle"
 import { inviteTokens } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function GET(req: NextRequest) {
+export const GET = withErrorHandling(async (req: NextRequest) => {
   const token = req.nextUrl.searchParams.get("token")
   if (!token) return NextResponse.json({ valid: false, error: "Token não informado" })
 
@@ -15,4 +16,4 @@ export async function GET(req: NextRequest) {
   if (new Date() > new Date(invite.expiresAt)) return NextResponse.json({ valid: false, error: "Link expirado" })
 
   return NextResponse.json({ valid: true, role: invite.role, email: invite.email })
-}
+})

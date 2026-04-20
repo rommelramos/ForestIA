@@ -4,17 +4,18 @@ import { getDb } from "@/lib/db/drizzle"
 import { geospatialSources } from "@/lib/db/schema"
 import { geospatialSourceSchema, PUBLIC_SOURCES } from "@/modules/geospatial-sources/schemas"
 import { eq } from "drizzle-orm"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
   const db = getDb()
   const list = await db.select().from(geospatialSources).where(eq(geospatialSources.isActive, true)).orderBy(geospatialSources.name)
   return NextResponse.json(list)
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -44,4 +45,4 @@ export async function POST(req: NextRequest) {
   }).$returningId()
 
   return NextResponse.json({ success: true, id: result.id }, { status: 201 })
-}
+})

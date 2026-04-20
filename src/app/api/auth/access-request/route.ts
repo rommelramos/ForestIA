@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm"
 import { getDb } from "@/lib/db/drizzle"
 import { accessRequests } from "@/lib/db/schema"
 import { accessRequestSchema } from "@/modules/auth/schemas"
+import { dbErrorResponse } from "@/lib/api/errors"
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ success: true })
-  } catch {
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+  } catch (err) {
+    return dbErrorResponse(err)
   }
 }

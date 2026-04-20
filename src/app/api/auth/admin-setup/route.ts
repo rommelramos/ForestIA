@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid"
 import { getDb } from "@/lib/db/drizzle"
 import { users } from "@/lib/db/schema"
 import { adminSetupSchema } from "@/modules/auth/schemas"
+import { dbErrorResponse } from "@/lib/api/errors"
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ success: true })
-  } catch {
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 })
+  } catch (err) {
+    return dbErrorResponse(err)
   }
 }

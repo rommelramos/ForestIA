@@ -4,6 +4,7 @@ import { auth } from "../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { viabilityReports, projects, projectMembers } from "@/lib/db/schema"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const createSchema = z.object({
   projectId: z.number(),
@@ -11,7 +12,7 @@ const createSchema = z.object({
   content: z.record(z.string(), z.unknown()).optional(),
 })
 
-export async function GET(req: NextRequest) {
+export const GET = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
@@ -28,9 +29,9 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(list)
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || !["admin", "gerente", "funcionario"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -59,4 +60,4 @@ export async function POST(req: NextRequest) {
   }).$returningId()
 
   return NextResponse.json({ success: true, id: result.id, version: nextVersion }, { status: 201 })
-}
+})

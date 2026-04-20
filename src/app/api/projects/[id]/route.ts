@@ -4,8 +4,9 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { projects, projectMembers, projectStages, users } from "@/lib/db/schema"
 import { projectSchema } from "@/modules/projects/schemas"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withErrorHandling(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
@@ -23,9 +24,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .where(eq(projectMembers.projectId, Number(id)))
 
   return NextResponse.json({ ...project, stages, members })
-}
+})
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -45,9 +46,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }).where(eq(projects.id, Number(id)))
 
   return NextResponse.json({ success: true })
-}
+})
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withErrorHandling(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -57,4 +58,4 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const db = getDb()
   await db.delete(projects).where(eq(projects.id, Number(id)))
   return NextResponse.json({ success: true })
-}
+})

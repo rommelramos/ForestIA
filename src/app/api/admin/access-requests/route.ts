@@ -6,8 +6,9 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { accessRequests, users, auditLogs } from "@/lib/db/schema"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -15,7 +16,7 @@ export async function GET() {
   const db = getDb()
   const list = await db.select().from(accessRequests).orderBy(accessRequests.createdAt)
   return NextResponse.json(list)
-}
+})
 
 const reviewSchema = z.object({
   id: z.number(),
@@ -23,7 +24,7 @@ const reviewSchema = z.object({
   temporaryPassword: z.string().min(8).optional(),
 })
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -72,4 +73,4 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ success: true })
-}
+})

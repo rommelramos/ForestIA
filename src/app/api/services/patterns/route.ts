@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db/drizzle"
 import { servicePatterns } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const schema = z.object({
   trigger: z.string().min(10),
@@ -13,14 +14,14 @@ const schema = z.object({
   tags: z.array(z.string()).optional(),
 })
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session || session.user.role !== "admin") return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
   const db = getDb()
   return NextResponse.json(await db.select().from(servicePatterns))
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
   const parsed = schema.safeParse(await req.json())
@@ -28,13 +29,13 @@ export async function POST(req: NextRequest) {
   const db = getDb()
   const [r] = await db.insert(servicePatterns).values({ ...parsed.data, createdBy: session.user.id }).$returningId()
   return NextResponse.json({ success: true, id: r.id }, { status: 201 })
-}
+})
 
-export async function DELETE(req: NextRequest) {
+export const DELETE = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
   const { id } = await req.json()
   const db = getDb()
   await db.delete(servicePatterns).where(eq(servicePatterns.id, Number(id)))
   return NextResponse.json({ success: true })
-}
+})

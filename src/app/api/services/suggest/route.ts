@@ -4,8 +4,9 @@ import { getDb } from "@/lib/db/drizzle"
 import { servicePatterns, projects, aoiAnalyses, satelliteAnalyses, layerOverlaps } from "@/lib/db/schema"
 import { eq } from "drizzle-orm"
 import Anthropic from "@anthropic-ai/sdk"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || !["admin","gerente","funcionario"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -83,9 +84,9 @@ Responda SOMENTE com um JSON no formato:
   } catch {
     return NextResponse.json({ error: "Erro ao processar resposta da IA" }, { status: 500 })
   }
-}
+})
 
-export async function GET(req: NextRequest) {
+export const GET = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -93,4 +94,4 @@ export async function GET(req: NextRequest) {
   const db = getDb()
   const list = await db.select().from(servicePatterns)
   return NextResponse.json(list)
-}
+})

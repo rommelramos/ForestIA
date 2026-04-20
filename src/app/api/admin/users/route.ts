@@ -6,6 +6,7 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { users, auditLogs } from "@/lib/db/schema"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const createUserSchema = z.object({
   name: z.string().min(2),
@@ -23,7 +24,7 @@ const updateUserSchema = z.object({
   allowGoogleLogin: z.boolean().optional(),
 })
 
-export async function GET() {
+export const GET = withErrorHandling(async () => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -38,9 +39,9 @@ export async function GET() {
     .from(users)
     .orderBy(users.createdAt)
   return NextResponse.json(list)
-}
+})
 
-export async function POST(req: NextRequest) {
+export const POST = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -72,9 +73,9 @@ export async function POST(req: NextRequest) {
     metadata: { email: parsed.data.email, role: parsed.data.role },
   })
   return NextResponse.json({ success: true, id })
-}
+})
 
-export async function PATCH(req: NextRequest) {
+export const PATCH = withErrorHandling(async (req: NextRequest) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -94,4 +95,4 @@ export async function PATCH(req: NextRequest) {
     metadata: updates,
   })
   return NextResponse.json({ success: true })
-}
+})

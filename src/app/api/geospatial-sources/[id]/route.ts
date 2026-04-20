@@ -4,8 +4,9 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { geospatialSources } from "@/lib/db/schema"
 import { geospatialSourceSchema } from "@/modules/geospatial-sources/schemas"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -18,9 +19,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const db = getDb()
   await db.update(geospatialSources).set(parsed.data).where(eq(geospatialSources.id, Number(id)))
   return NextResponse.json({ success: true })
-}
+})
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withErrorHandling(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || session.user.role !== "admin") {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -29,4 +30,4 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const db = getDb()
   await db.update(geospatialSources).set({ isActive: false }).where(eq(geospatialSources.id, Number(id)))
   return NextResponse.json({ success: true })
-}
+})

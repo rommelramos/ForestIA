@@ -4,13 +4,14 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { aoiAnalyses } from "@/lib/db/schema"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const patchSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   notes: z.string().optional(),
 })
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
@@ -20,9 +21,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!row) return NextResponse.json({ error: "Não encontrado" }, { status: 404 })
 
   return NextResponse.json(row)
-}
+})
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente", "funcionario"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -37,9 +38,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   await db.update(aoiAnalyses).set(parsed.data).where(eq(aoiAnalyses.id, Number(id)))
 
   return NextResponse.json({ success: true })
-}
+})
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente", "funcionario"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -50,4 +51,4 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   await db.delete(aoiAnalyses).where(eq(aoiAnalyses.id, Number(id)))
 
   return NextResponse.json({ success: true })
-}
+})

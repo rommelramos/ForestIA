@@ -15,6 +15,20 @@
       "when": 1776686664554,
       "tag": "0001_material_iron_patriot",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1776694760335,
+      "tag": "0002_misty_praxagora",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1776704233830,
+      "tag": "0003_even_agent_zero",
+      "breakpoints": true
     }
   ]
 }

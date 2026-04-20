@@ -4,8 +4,9 @@ import { auth } from "../../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { projectMembers } from "@/lib/db/schema"
 import { memberSchema } from "@/modules/projects/schemas"
+import { withErrorHandling } from "@/lib/api/errors"
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const POST = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -19,9 +20,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const db = getDb()
   await db.insert(projectMembers).values({ projectId: Number(id), ...parsed.data })
   return NextResponse.json({ success: true }, { status: 201 })
-}
+})
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const DELETE = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -34,4 +35,4 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     and(eq(projectMembers.projectId, Number(id)), eq(projectMembers.userId, userId))
   )
   return NextResponse.json({ success: true })
-}
+})

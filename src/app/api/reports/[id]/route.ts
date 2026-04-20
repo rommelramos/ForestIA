@@ -4,6 +4,7 @@ import { auth } from "../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { viabilityReports } from "@/lib/db/schema"
 import { z } from "zod"
+import { withErrorHandling } from "@/lib/api/errors"
 
 const updateSchema = z.object({
   title: z.string().optional(),
@@ -17,7 +18,7 @@ const updateSchema = z.object({
   isPublished: z.boolean().optional(),
 })
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const GET = withErrorHandling(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
@@ -26,9 +27,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [report] = await db.select().from(viabilityReports).where(eq(viabilityReports.id, Number(id))).limit(1)
   if (!report) return NextResponse.json({ error: "Não encontrado" }, { status: 404 })
   return NextResponse.json(report)
-}
+})
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export const PATCH = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
   const session = await auth()
   if (!session || !["admin", "gerente", "funcionario"].includes(session.user.role)) {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
@@ -49,4 +50,4 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   await db.update(viabilityReports).set(updates).where(eq(viabilityReports.id, Number(id)))
   return NextResponse.json({ success: true })
-}
+})
