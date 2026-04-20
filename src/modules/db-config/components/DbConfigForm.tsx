@@ -24,7 +24,7 @@ const DEFAULT_VALUES: DbCredentialsInput = {
 
 export function DbConfigForm() {
   const { status, response, testConnection, executeDbAction } = useDbConfig()
-  const [dialogAction, setDialogAction] = useState<"create" | "regenerate" | null>(null)
+  const [dialogAction, setDialogAction] = useState<"create" | "regenerate" | "migrate" | null>(null)
   const [pendingCredentials, setPendingCredentials] = useState<DbCredentialsInput | null>(null)
 
   const {
@@ -54,7 +54,16 @@ export function DbConfigForm() {
     }
   }
 
-  async function onDialogConfirm(action: "create" | "regenerate") {
+  function onClickMigrate() {
+    const values = getValues()
+    const parsed = dbCredentialsSchema.safeParse(values)
+    if (parsed.success) {
+      setPendingCredentials(parsed.data)
+      setDialogAction("migrate")
+    }
+  }
+
+  async function onDialogConfirm(action: "create" | "regenerate" | "migrate") {
     if (!pendingCredentials) return
     await executeDbAction(action, pendingCredentials)
     setDialogAction(null)
@@ -129,6 +138,13 @@ export function DbConfigForm() {
               {response?.success && response.databaseExists && (
                 <>
                   <Separator orientation="vertical" className="h-8" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onClickMigrate}
+                  >
+                    ⬆ Aplicar Migrações
+                  </Button>
                   <Button
                     type="button"
                     variant="destructive"

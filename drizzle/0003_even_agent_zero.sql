@@ -1,0 +1,1 @@
+ALTER TABLE `aoi_analyses` MODIFY COLUMN `geojson` longtext;

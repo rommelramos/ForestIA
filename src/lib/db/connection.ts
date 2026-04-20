@@ -79,7 +79,7 @@ export async function checkDatabaseExists(credentials: DbCredentials): Promise<b
   }
 }
 
-async function runMigrations(credentials: DbCredentials): Promise<void> {
+export async function runMigrations(credentials: DbCredentials): Promise<void> {
   const pool = mysql.createPool({
     host: credentials.host,
     port: credentials.port,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createDatabase, dropAndRecreateDatabase } from "@/lib/db"
+import { createDatabase, dropAndRecreateDatabase, runMigrations } from "@/lib/db"
 import { dbActionSchema } from "@/modules/db-config/schemas"
 
 export async function POST(req: NextRequest) {
@@ -20,6 +20,11 @@ export async function POST(req: NextRequest) {
 
     if (action === "regenerate") {
       await dropAndRecreateDatabase(credentials)
+      return NextResponse.json({ success: true, databaseExists: true })
+    }
+
+    if (action === "migrate") {
+      await runMigrations(credentials)
       return NextResponse.json({ success: true, databaseExists: true })
     }
 

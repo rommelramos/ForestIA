@@ -1,5 +1,5 @@
 import {
-  mysqlTable, varchar, int, timestamp, text,
+  mysqlTable, varchar, int, timestamp, text, longtext,
   decimal, boolean, tinyint, json, date,
 } from "drizzle-orm/mysql-core"
 
@@ -144,7 +144,7 @@ export const aoiAnalyses = mysqlTable("aoi_analyses", {
   projectId: int("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 255 }),
   notes: text("notes"),
-  geojson: text("geojson"),
+  geojson: longtext("geojson"),
   sourceType: varchar("source_type", { length: 50 }),
   uploadedFile: varchar("uploaded_file", { length: 255 }),
   status: varchar("status", { length: 50 }).notNull().default("pending"),
