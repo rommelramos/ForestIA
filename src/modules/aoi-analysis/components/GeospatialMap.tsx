@@ -98,6 +98,7 @@ export function GeospatialMap({ projectId }: { projectId?: number }) {
   const [labelInput, setLabelInput] = useState("")
   const [newLayerType, setNewLayerType] = useState<LayerType>("aoi")
   const [saving,     setSaving]     = useState(false)
+  const [saveDialog, setSaveDialog] = useState<{ open: boolean; aoiResult?: AoiResult; name: string; notes: string }>({ open: false, name: "", notes: "" })
   const fileRef = useRef<HTMLInputElement>(null)
 
   // ── Init map ────────────────────────────────────────────────────────────────
@@ -409,20 +410,37 @@ export function GeospatialMap({ projectId }: { projectId?: number }) {
   }, [layers])
 
   // ── Save to project ─────────────────────────────────────────────────────────
-  const saveToProject = useCallback(async (aoiResult: AoiResult) => {
+  const saveToProject = useCallback((aoiResult: AoiResult) => {
     if (!projectId) { alert("Abra esta análise a partir de um projeto para salvar."); return }
+    setSaveDialog({ open: true, aoiResult, name: `Sobreposição – ${aoiResult.aoiName}`, notes: "" })
+  }, [projectId])
+
+  const confirmSave = useCallback(async () => {
+    if (!saveDialog.aoiResult || !projectId) return
     setSaving(true)
     try {
+      const aoiResult = saveDialog.aoiResult
       const allIntersections = aoiResult.restrictions.flatMap(r => r.entries.map(e => e.intersection))
       const fc: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: allIntersections }
-      await fetch("/api/aoi-analysis", {
+      const res = await fetch("/api/aoi-analysis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, geojson: JSON.stringify(fc), sourceType: "manual" }),
+        body: JSON.stringify({
+          projectId,
+          name: saveDialog.name.trim() || `Sobreposição – ${aoiResult.aoiName}`,
+          notes: saveDialog.notes.trim() || undefined,
+          geojson: JSON.stringify(fc),
+          sourceType: "manual",
+        }),
       })
-      alert("Análise salva no projeto!")
+      if (res.ok) {
+        setSaveDialog({ open: false, name: "", notes: "" })
+        alert("Análise salva com sucesso!")
+      } else {
+        alert("Erro ao salvar. Tente novamente.")
+      }
     } finally { setSaving(false) }
-  }, [projectId])
+  }, [saveDialog, projectId])
 
   // ── Derived state ───────────────────────────────────────────────────────────
   const aoiLayers   = layers.filter(l => l.layerType === "aoi")
@@ -643,6 +661,49 @@ export function GeospatialMap({ projectId }: { projectId?: number }) {
           </div>
         )}
       </div>
+
+      {/* Save overlap modal */}
+      {saveDialog.open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[9999]">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-96 space-y-4">
+            <h3 className="font-semibold text-gray-900">💾 Salvar sobreposição</h3>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Nome da análise</label>
+              <input
+                autoFocus
+                value={saveDialog.name}
+                onChange={e => setSaveDialog(s => ({ ...s, name: e.target.value }))}
+                onKeyDown={e => e.key === "Enter" && confirmSave()}
+                placeholder="Ex: Sobreposição APP – Fazenda Boa Vista"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Observações (opcional)</label>
+              <textarea
+                value={saveDialog.notes}
+                onChange={e => setSaveDialog(s => ({ ...s, notes: e.target.value }))}
+                placeholder="Anotações sobre esta sobreposição…"
+                rows={3}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setSaveDialog({ open: false, name: "", notes: "" })}
+                className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button
+                onClick={confirmSave}
+                disabled={saving || !saveDialog.name.trim()}
+                className="px-4 py-1.5 text-sm bg-green-700 text-white rounded hover:bg-green-800 disabled:opacity-40">
+                {saving ? "Salvando…" : "Salvar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Save drawn modal */}
       {modal.open && (

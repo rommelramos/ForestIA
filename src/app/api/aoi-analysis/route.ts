@@ -7,6 +7,8 @@ import { z } from "zod"
 
 const createSchema = z.object({
   projectId: z.number(),
+  name: z.string().max(255).optional(),
+  notes: z.string().optional(),
   geojson: z.string(),
   sourceType: z.enum(["upload", "manual", "sicar"]).default("manual"),
   uploadedFile: z.string().optional(),

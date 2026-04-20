@@ -142,6 +142,8 @@ export const projectStages = mysqlTable("project_stages", {
 export const aoiAnalyses = mysqlTable("aoi_analyses", {
   id: int("id").autoincrement().primaryKey(),
   projectId: int("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 255 }),
+  notes: text("notes"),
   geojson: text("geojson"),
   sourceType: varchar("source_type", { length: 50 }),
   uploadedFile: varchar("uploaded_file", { length: 255 }),
