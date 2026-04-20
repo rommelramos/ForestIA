@@ -69,8 +69,8 @@ export default async function ProjectLayout({
         </nav>
       </div>
 
-      {/* Tab content */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      {/* Tab content — each page manages its own scroll */}
+      <div className="flex-1 min-h-0 overflow-hidden">
         {children}
       </div>
     </div>

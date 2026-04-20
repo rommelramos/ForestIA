@@ -24,7 +24,7 @@ export default async function ProjectSatellitePage({ params }: { params: Promise
     analyses.length ? (analyses.reduce((s, a) => s + Number(a[key] ?? 0), 0) / analyses.length).toFixed(3) : "—"
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full overflow-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-gray-900">Análise por Satélite</h2>
         <span className="text-xs text-gray-400">{analyses.length} imagem(ns)</span>

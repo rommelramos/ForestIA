@@ -44,7 +44,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const canManageStages = ["admin", "gerente", "funcionario"].includes(session.user.role)
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="h-full overflow-auto p-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <div className="flex items-center gap-3">

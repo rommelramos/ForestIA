@@ -80,7 +80,7 @@ function downloadGeoJSON(fc: GeoJSON.FeatureCollection, filename: string) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function GeospatialMap({ projectId }: { projectId?: number }) {
+export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSaved?: () => void }) {
   const containerRef   = useRef<HTMLDivElement>(null)
   const mapRef         = useRef<import("leaflet").Map | null>(null)
   const baseTileRef    = useRef<import("leaflet").TileLayer | null>(null)
@@ -435,6 +435,7 @@ export function GeospatialMap({ projectId }: { projectId?: number }) {
       })
       if (res.ok) {
         setSaveDialog({ open: false, name: "", notes: "" })
+        onSaved?.()
         alert("Análise salva com sucesso!")
       } else {
         alert("Erro ao salvar. Tente novamente.")

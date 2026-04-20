@@ -30,7 +30,7 @@ export default async function ProjectServicesPage({ params }: { params: Promise<
   const isAdmin   = session?.user.role === "admin"
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full overflow-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-gray-900">Novos Serviços</h2>
       </div>

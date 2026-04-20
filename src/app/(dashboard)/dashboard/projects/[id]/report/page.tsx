@@ -26,7 +26,7 @@ export default async function ProjectReportPage({ params }: { params: Promise<{ 
   const canCreate = ["admin","gerente","funcionario"].includes(session?.user.role ?? "")
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="h-full overflow-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-gray-900">Relatório de Viabilidade</h2>
         {canCreate && (

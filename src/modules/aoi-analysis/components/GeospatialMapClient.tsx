@@ -6,6 +6,6 @@ const GeospatialMap = dynamic(
   { ssr: false, loading: () => <div className="flex-1 flex items-center justify-center text-gray-400 text-sm h-full">Carregando mapa...</div> }
 )
 
-export function GeospatialMapClient({ projectId }: { projectId?: number }) {
-  return <GeospatialMap projectId={projectId} />
+export function GeospatialMapClient({ projectId, onSaved }: { projectId?: number; onSaved?: () => void }) {
+  return <GeospatialMap projectId={projectId} onSaved={onSaved} />
 }

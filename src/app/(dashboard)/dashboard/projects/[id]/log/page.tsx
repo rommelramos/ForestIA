@@ -25,7 +25,7 @@ export default async function ProjectLogPage({ params }: { params: Promise<{ id:
     .limit(500)
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="h-full overflow-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-gray-900">Log de Auditoria do Projeto</h2>
         <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded">

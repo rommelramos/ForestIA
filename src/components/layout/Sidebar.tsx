@@ -49,7 +49,7 @@ export function Sidebar({ userRole, userName }: SidebarProps) {
   const visible = NAV_ITEMS.filter((item) => item.roles.includes(userRole))
 
   return (
-    <aside className="flex flex-col w-64 min-h-screen bg-green-950 text-white">
+    <aside className="flex flex-col w-64 h-full flex-shrink-0 bg-green-950 text-white">
       <div className="px-6 py-5 border-b border-green-800">
         <h1 className="text-xl font-bold tracking-tight">ForestIA</h1>
         <p className="text-xs text-green-400 mt-0.5">Gestão Florestal Inteligente</p>
