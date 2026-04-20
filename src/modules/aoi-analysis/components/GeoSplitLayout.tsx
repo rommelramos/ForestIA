@@ -4,8 +4,12 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import { GeospatialMapClient } from "./GeospatialMapClient"
 import { OverlapsList } from "./OverlapsList"
 
-const PANEL_MIN   = 48   // px — collapsed header only
-const PANEL_OPEN  = 260  // px — default open height
+const W         = 400   // window width px
+const H_OPEN    = 320   // window height when expanded
+const H_HEADER  = 40    // header bar height
+const PAD       = 16    // margin from container edge
+
+interface Pos { x: number; y: number }
 
 interface Props {
   projectId: number
@@ -13,107 +17,115 @@ interface Props {
 }
 
 export function GeoSplitLayout({ projectId, canManage }: Props) {
-  const containerRef    = useRef<HTMLDivElement>(null)
-  const isDragging      = useRef(false)
-  const startY          = useRef(0)
-  const startHeight     = useRef(0)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const dragging      = useRef(false)
+  const dragOffset    = useRef<Pos>({ x: 0, y: 0 })
 
-  const [panelH,     setPanelH]     = useState(PANEL_OPEN)
-  const [collapsed,  setCollapsed]  = useState(false)
-  // key to force OverlapsList re-fetch after saving
-  const [listKey,    setListKey]    = useState(0)
+  // Position: bottom-right corner initially (set after mount)
+  const [pos,       setPos]       = useState<Pos | null>(null)
+  const [minimized, setMinimized] = useState(false)
+  const [listKey,   setListKey]   = useState(0)
 
-  // ── Drag ──────────────────────────────────────────────────────────────────
-  const onMouseDown = useCallback((e: React.MouseEvent) => {
-    isDragging.current  = true
-    startY.current      = e.clientY
-    startHeight.current = panelH
-    e.preventDefault()
-  }, [panelH])
-
+  // Set initial position once container is measured
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!isDragging.current || !containerRef.current) return
-      const totalH  = containerRef.current.offsetHeight
-      const delta   = startY.current - e.clientY
-      const next    = Math.max(PANEL_MIN, Math.min(startHeight.current + delta, totalH - 120))
-      setPanelH(next)
-      if (next > PANEL_MIN + 10) setCollapsed(false)
-    }
-    const onUp = () => { isDragging.current = false }
-
-    window.addEventListener("mousemove", onMove)
-    window.addEventListener("mouseup",   onUp)
-    return () => {
-      window.removeEventListener("mousemove", onMove)
-      window.removeEventListener("mouseup",   onUp)
-    }
-  }, [])
-
-  // ── Collapse / expand ─────────────────────────────────────────────────────
-  const toggle = useCallback(() => {
-    setCollapsed(c => {
-      if (c) setPanelH(PANEL_OPEN)   // restore when expanding
-      return !c
+    if (!containerRef.current) return
+    const { offsetWidth: w, offsetHeight: h } = containerRef.current
+    setPos({
+      x: w - W - PAD,
+      y: h - H_OPEN - PAD,
     })
   }, [])
 
-  const effectiveH = collapsed ? PANEL_MIN : panelH
+  // ── Drag: move window by its header ──────────────────────────────────────
+  const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!pos) return
+    dragging.current   = true
+    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y }
+    e.preventDefault()
+  }, [pos])
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current || !containerRef.current) return
+      const { offsetWidth: cw, offsetHeight: ch } = containerRef.current
+      const winH = minimized ? H_HEADER : H_OPEN
+      const x = Math.max(0, Math.min(e.clientX - dragOffset.current.x, cw - W))
+      const y = Math.max(0, Math.min(e.clientY - dragOffset.current.y, ch - winH))
+      setPos({ x, y })
+    }
+    const onUp = () => { dragging.current = false }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [minimized])
+
+  // ── Toggle minimize ───────────────────────────────────────────────────────
+  const toggle = useCallback(() => setMinimized(m => !m), [])
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full select-none">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden">
 
-      {/* ── Map — fills remaining space ── */}
-      <div className="flex-1 min-h-0">
-        {/* Pass a callback so the map can trigger a list refresh */}
+      {/* Map — full area */}
+      <div className="absolute inset-0">
         <GeospatialMapClient
           projectId={projectId}
           onSaved={() => setListKey(k => k + 1)}
         />
       </div>
 
-      {/* ── Bottom panel ── */}
-      <div
-        style={{ height: effectiveH }}
-        className="flex-shrink-0 flex flex-col border-t bg-gray-50 overflow-hidden transition-[height] duration-150"
-      >
-        {/* Drag handle + header */}
+      {/* Floating window */}
+      {pos && (
         <div
-          onMouseDown={onMouseDown}
-          className="flex items-center justify-between px-4 border-b bg-white cursor-row-resize flex-shrink-0"
-          style={{ height: PANEL_MIN }}
+          style={{
+            position: "absolute",
+            left:   pos.x,
+            top:    pos.y,
+            width:  W,
+            height: minimized ? H_HEADER : H_OPEN,
+            zIndex: 1000,
+          }}
+          className="flex flex-col rounded-xl shadow-2xl border border-gray-200 bg-white overflow-hidden transition-[height] duration-150"
         >
-          {/* Drag grip dots */}
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col gap-[3px] opacity-40">
-              <div className="flex gap-[3px]">
-                {[0,1,2,3,4].map(i => <div key={i} className="w-[3px] h-[3px] rounded-full bg-gray-500" />)}
-              </div>
-              <div className="flex gap-[3px]">
-                {[0,1,2,3,4].map(i => <div key={i} className="w-[3px] h-[3px] rounded-full bg-gray-500" />)}
-              </div>
-            </div>
-            <span className="text-xs font-semibold text-gray-700 select-none">
-              🗂️ Sobreposições salvas
-            </span>
-          </div>
-
-          <button
-            onMouseDown={e => e.stopPropagation()}
-            onClick={toggle}
-            className="text-xs text-gray-400 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 transition-colors select-none"
+          {/* Title bar — drag handle */}
+          <div
+            onMouseDown={onHeaderMouseDown}
+            className="flex items-center justify-between px-3 bg-green-900 text-white cursor-grab active:cursor-grabbing select-none flex-shrink-0"
+            style={{ height: H_HEADER }}
           >
-            {collapsed ? "▲ Expandir" : "▼ Recolher"}
-          </button>
-        </div>
+            <div className="flex items-center gap-2">
+              {/* Grip icon */}
+              <div className="flex flex-col gap-[3px] opacity-50">
+                <div className="flex gap-[3px]">
+                  {[0,1,2,3].map(i => <div key={i} className="w-[3px] h-[3px] rounded-full bg-white" />)}
+                </div>
+                <div className="flex gap-[3px]">
+                  {[0,1,2,3].map(i => <div key={i} className="w-[3px] h-[3px] rounded-full bg-white" />)}
+                </div>
+              </div>
+              <span className="text-xs font-semibold tracking-wide">🗂️ Sobreposições salvas</span>
+            </div>
 
-        {/* List — only visible when panel is open */}
-        {!collapsed && (
-          <div className="flex-1 overflow-y-auto p-4">
-            <OverlapsList key={listKey} projectId={projectId} canManage={canManage} />
+            <button
+              onMouseDown={e => e.stopPropagation()}
+              onClick={toggle}
+              title={minimized ? "Expandir" : "Minimizar"}
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors text-white text-sm"
+            >
+              {minimized ? "□" : "─"}
+            </button>
           </div>
-        )}
-      </div>
+
+          {/* Content */}
+          {!minimized && (
+            <div className="flex-1 overflow-y-auto p-3 bg-gray-50">
+              <OverlapsList key={listKey} projectId={projectId} canManage={canManage} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
