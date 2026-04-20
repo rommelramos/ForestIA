@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface DbActionDialogProps {
-  action: "create" | "regenerate" | "migrate" | null
-  onConfirm: (action: "create" | "regenerate" | "migrate") => void
+  action: "create" | "regenerate" | null
+  onConfirm: (action: "create" | "regenerate") => void
   onCancel: () => void
 }
 
@@ -26,15 +26,9 @@ const MESSAGES = {
   },
   regenerate: {
     title: "Regenerar banco de dados",
-    description: "Tem certeza que deseja regenerar o banco? Esta ação irá apagar TODOS os dados existentes.",
+    description: "Esta ação recria o banco do zero com a estrutura de tabelas mais recente. Todos os dados existentes serão apagados permanentemente.",
     confirmLabel: "Sim, apagar e recriar",
     isDestructive: true,
-  },
-  migrate: {
-    title: "Aplicar migrações pendentes",
-    description: "Aplica todas as migrações de schema que ainda não foram executadas no banco atual. Os dados existentes são preservados.",
-    confirmLabel: "Aplicar migrações",
-    isDestructive: false,
   },
 }
 

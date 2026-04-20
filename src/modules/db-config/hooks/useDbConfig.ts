@@ -30,7 +30,7 @@ export function useDbConfig() {
     }
   }
 
-  async function executeDbAction(action: "create" | "regenerate" | "migrate", credentials: DbCredentialsInput): Promise<TestConnectionResponse> {
+  async function executeDbAction(action: "create" | "regenerate", credentials: DbCredentialsInput): Promise<TestConnectionResponse> {
     setStatus("testing")
     try {
       const res = await fetch("/api/db-config/action", {

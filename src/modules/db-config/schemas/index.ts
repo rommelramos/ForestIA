@@ -19,7 +19,7 @@ export const testConnectionResponseSchema = z.object({
 export type TestConnectionResponse = z.infer<typeof testConnectionResponseSchema>
 
 export const dbActionSchema = z.object({
-  action: z.enum(["create", "regenerate", "migrate"]),
+  action: z.enum(["create", "regenerate"]),
   credentials: dbCredentialsSchema,
 })
 
