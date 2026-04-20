@@ -14,10 +14,17 @@ const createSchema = z.object({
   uploadedFile: z.string().optional(),
 })
 
-/** True when the DB error is a missing-column error (migration not yet applied) */
+/**
+ * Checks whether err (or its cause) is a missing-column DB error,
+ * which means migration 0002/0003 has not been applied yet.
+ */
 function isMissingColumn(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
-  return msg.includes("unknown column") || msg.includes("er_bad_field_error")
+  const text = [
+    err instanceof Error ? err.message : String(err),
+    err instanceof Error && err.cause instanceof Error ? err.cause.message : "",
+    err instanceof Error && err.cause ? String(err.cause) : "",
+  ].join(" ").toLowerCase()
+  return text.includes("unknown column") || text.includes("er_bad_field_error")
 }
 
 export async function GET(req: NextRequest) {
@@ -28,16 +35,50 @@ export async function GET(req: NextRequest) {
   const db = getDb()
 
   try {
+    // Full select (requires migration 0002 — name, notes columns)
     const list = projectId
       ? await db.select().from(aoiAnalyses).where(eq(aoiAnalyses.projectId, Number(projectId)))
       : await db.select().from(aoiAnalyses).orderBy(aoiAnalyses.createdAt)
     return NextResponse.json(list)
   } catch (err) {
-    if (isMissingColumn(err)) {
-      // Migration not yet applied — return empty list gracefully
+    if (!isMissingColumn(err)) throw err
+
+    // Fallback: migration not yet applied — select only original columns
+    try {
+      const list = projectId
+        ? await db
+            .select({
+              id:           aoiAnalyses.id,
+              projectId:    aoiAnalyses.projectId,
+              geojson:      aoiAnalyses.geojson,
+              sourceType:   aoiAnalyses.sourceType,
+              uploadedFile: aoiAnalyses.uploadedFile,
+              status:       aoiAnalyses.status,
+              analysisResult: aoiAnalyses.analysisResult,
+              createdBy:    aoiAnalyses.createdBy,
+              createdAt:    aoiAnalyses.createdAt,
+            })
+            .from(aoiAnalyses)
+            .where(eq(aoiAnalyses.projectId, Number(projectId)))
+        : await db
+            .select({
+              id:           aoiAnalyses.id,
+              projectId:    aoiAnalyses.projectId,
+              geojson:      aoiAnalyses.geojson,
+              sourceType:   aoiAnalyses.sourceType,
+              uploadedFile: aoiAnalyses.uploadedFile,
+              status:       aoiAnalyses.status,
+              analysisResult: aoiAnalyses.analysisResult,
+              createdBy:    aoiAnalyses.createdBy,
+              createdAt:    aoiAnalyses.createdAt,
+            })
+            .from(aoiAnalyses)
+            .orderBy(aoiAnalyses.createdAt)
+      // Normalise shape so OverlapsList always gets name/notes (null)
+      return NextResponse.json(list.map(r => ({ ...r, name: null, notes: null })))
+    } catch {
       return NextResponse.json([])
     }
-    throw err
   }
 }
 
@@ -74,7 +115,7 @@ export async function POST(req: NextRequest) {
     // Fallback: migration not applied — save without name/notes
     const [result] = await db.insert(aoiAnalyses).values(base).$returningId()
     return NextResponse.json(
-      { success: true, id: result.id, warning: "Aplique as migrações em /setup/db para salvar nome e notas." },
+      { success: true, id: result.id, warning: "Execute 'Regenerar Banco' em /setup/db para habilitar nome e notas." },
       { status: 201 },
     )
   }
