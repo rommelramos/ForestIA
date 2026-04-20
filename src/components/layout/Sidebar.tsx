@@ -21,19 +21,15 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Início", href: "/dashboard", icon: LayoutDashboard, roles: ["admin", "gerente", "funcionario", "cliente"] },
-  { label: "Usuários", href: "/dashboard/users", icon: Users, roles: ["admin", "gerente"] },
-  { label: "Solicitações de Acesso", href: "/dashboard/access-requests", icon: Building2, roles: ["admin"] },
-  { label: "Bases Geoespaciais", href: "/dashboard/geospatial-sources", icon: Map, roles: ["admin", "gerente", "funcionario"] },
-  { label: "Análise Geoespacial", href: "/dashboard/aoi-analysis", icon: Map, roles: ["admin", "gerente", "funcionario"] },
-  { label: "Análise por Satélite", href: "/dashboard/satellite", icon: Satellite, roles: ["admin", "gerente", "funcionario"] },
-  { label: "Relatórios", href: "/dashboard/reports", icon: FileText, roles: ["admin", "gerente", "funcionario", "cliente"] },
-  { label: "Projetos", href: "/dashboard/projects", icon: FolderKanban, roles: ["admin", "gerente", "funcionario", "cliente"] },
-  { label: "Novos Serviços", href: "/dashboard/opportunities", icon: Lightbulb, roles: ["admin", "gerente"] },
-  { label: "Integrações", href: "/dashboard/integrations", icon: Plug, roles: ["admin", "gerente", "funcionario"] },
-  { label: "Portal Cliente", href: "/dashboard/client-portal", icon: Building2, roles: ["cliente"] },
-  { label: "Banco de Dados", href: "/setup/db", icon: Database, roles: ["admin"] },
-  { label: "Log de Auditoria", href: "/dashboard/audit-log", icon: Settings, roles: ["admin"] },
+  { label: "Início",                 href: "/dashboard",                 icon: LayoutDashboard, roles: ["admin","gerente","funcionario","cliente"] },
+  { label: "Projetos",               href: "/dashboard/projects",         icon: FolderKanban,    roles: ["admin","gerente","funcionario","cliente"] },
+  { label: "Usuários",               href: "/dashboard/users",            icon: Users,           roles: ["admin","gerente"] },
+  { label: "Solicitações de Acesso", href: "/dashboard/access-requests",  icon: Building2,       roles: ["admin"] },
+  { label: "Bases Geoespaciais",     href: "/dashboard/geospatial-sources",icon: Map,            roles: ["admin","gerente","funcionario"] },
+  { label: "Integrações",            href: "/dashboard/integrations",     icon: Plug,            roles: ["admin","gerente","funcionario"] },
+  { label: "Portal Cliente",         href: "/dashboard/client-portal",    icon: Building2,       roles: ["cliente"] },
+  { label: "Banco de Dados",         href: "/setup/db",                   icon: Database,        roles: ["admin"] },
+  { label: "Log de Auditoria",       href: "/dashboard/audit-log",        icon: Settings,        roles: ["admin"] },
 ]
 
 const ROLE_LABELS: Record<string, string> = {

@@ -62,6 +62,7 @@ export const accessRequests = mysqlTable("access_requests", {
 export const auditLogs = mysqlTable("audit_logs", {
   id: int("id").autoincrement().primaryKey(),
   userId: varchar("user_id", { length: 255 }).references(() => users.id),
+  projectId: int("project_id"),
   action: varchar("action", { length: 255 }).notNull(),
   entity: varchar("entity", { length: 100 }),
   entityId: varchar("entity_id", { length: 255 }),
@@ -237,4 +238,43 @@ export const integrationJobs = mysqlTable("integration_jobs", {
   completedAt: timestamp("completed_at"),
   createdBy: varchar("created_by", { length: 255 }).references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// ─── Convites de acesso ───────────────────────────────────────────────────────
+
+export const inviteTokens = mysqlTable("invite_tokens", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  email: varchar("email", { length: 255 }),
+  role: varchar("role", { length: 50 }).notNull().default("funcionario"),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdBy: varchar("created_by", { length: 255 }).references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// ─── Padrões de serviço para IA ───────────────────────────────────────────────
+
+export const servicePatterns = mysqlTable("service_patterns", {
+  id: int("id").autoincrement().primaryKey(),
+  trigger: text("trigger").notNull(),
+  suggestedService: text("suggested_service").notNull(),
+  rationale: text("rationale"),
+  category: varchar("category", { length: 100 }),
+  tags: json("tags"),
+  createdBy: varchar("created_by", { length: 255 }).references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
+
+// ─── Etapas do processo (portal cliente) ─────────────────────────────────────
+
+export const projectWorkflowSteps = mysqlTable("project_workflow_steps", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  order: tinyint("order").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("pending"),
+  completedAt: timestamp("completed_at"),
+  updatedBy: varchar("updated_by", { length: 255 }).references(() => users.id),
 })

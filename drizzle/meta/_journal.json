@@ -8,6 +8,13 @@
       "when": 1776635809622,
       "tag": "0000_living_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1776686664554,
+      "tag": "0001_material_iron_patriot",
+      "breakpoints": true
     }
   ]
 }
