@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { eq, or, inArray } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { auth } from "../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
-import { projects, projectMembers } from "@/lib/db/schema"
+import { projects, projectMembers, users } from "@/lib/db/schema"
 import { projectSchema } from "@/modules/projects/schemas"
 
 export async function GET() {
@@ -43,6 +43,16 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Dados inválidos", issues: parsed.error.issues }, { status: 400 })
 
   const db = getDb()
+
+  // Verify the session user still exists in the DB before writing
+  const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.id, session.user.id)).limit(1)
+  if (!dbUser) {
+    return NextResponse.json(
+      { error: "Sessão inválida. Faça logout e entre novamente." },
+      { status: 401 },
+    )
+  }
+
   const [result] = await db.insert(projects).values({
     ...parsed.data,
     areaHectares: parsed.data.areaHectares?.toString(),

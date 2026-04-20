@@ -59,23 +59,47 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async jwt({ token, user }) {
       if (user) {
+        // Initial sign-in — persist id and role into token
         token.role = (user as { role?: string }).role ?? "pending"
-        token.id = user.id
+        token.id   = user.id
+        return token
       }
-      if (token.id && !token.role) {
+
+      if (!token.id) return token
+
+      // On every token refresh, re-validate the user in the DB.
+      // This catches sessions where the user was deleted or deactivated
+      // (e.g. after a DB regeneration while the JWT was still alive).
+      try {
         const db = getDb()
         const [dbUser] = await db
           .select({ role: users.role, isActive: users.isActive })
           .from(users)
           .where(eq(users.id, token.id as string))
           .limit(1)
-        if (dbUser) token.role = dbUser.role
+
+        if (dbUser && dbUser.isActive) {
+          token.role = dbUser.role   // always pick up fresh role changes
+        } else {
+          // User no longer exists or is inactive — invalidate the token
+          token.id   = undefined
+          token.role = undefined
+        }
+      } catch {
+        // DB unreachable — keep current token as-is (graceful degradation)
       }
+
       return token
     },
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.id as string
+        if (!token.id) {
+          // Token was invalidated (user deleted / DB regenerated)
+          // Mark the session so the client can redirect to login
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return { ...session, user: undefined } as any
+        }
+        session.user.id   = token.id   as string
         session.user.role = token.role as string
       }
       return session
