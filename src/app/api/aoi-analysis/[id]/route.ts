@@ -7,8 +7,9 @@ import { z } from "zod"
 import { withErrorHandling } from "@/lib/api/errors"
 
 const patchSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  notes: z.string().optional(),
+  name:           z.string().min(1).max(255).optional(),
+  notes:          z.string().optional(),
+  analysisResult: z.unknown().optional(),
 })
 
 export const GET = withErrorHandling(async (req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {

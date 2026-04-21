@@ -64,7 +64,8 @@ export function OverlapsList({ projectId, canManage }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/aoi-analysis?project=${projectId}`)
+      // type=analysis excludes sourceType='layer' (working layers) from the list
+      const res = await fetch(`/api/aoi-analysis?project=${projectId}&type=analysis`)
       if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`)
       const data = await res.json()
       setAnalyses(Array.isArray(data) ? data : [])
