@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/**": ["./drizzle/**"],
   },
+  // Allow large GeoJSON bodies from shapefile uploads (up to 50 MB)
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
 }
 
 export default nextConfig

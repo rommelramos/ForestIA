@@ -4,18 +4,20 @@ import { v4 as uuidv4 } from "uuid"
 import {
   Pencil, Upload, Ban, TreePine, Target, Download, Trash2,
   Sun, Moon, ChevronLeft, ChevronRight, Eye, EyeOff, Layers,
-  Zap, X, Save, MapPin, Edit2, Loader2, Check,
+  Zap, X, Save, MapPin, Edit2, Loader2, Check, CloudOff,
+  AlertCircle, RotateCcw, CloudCheck,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LayerType = "aoi" | "restriction" | null
-type Theme     = "light" | "dark"
+type LayerType  = "aoi" | "restriction" | null
+type Theme      = "light" | "dark"
+type SyncStatus = "saving" | "saved" | "error" | "local"
 
 interface MapLayer {
   id:          string
-  dbId?:       number                          // persisted DB record id
+  dbId?:       number          // persisted DB record id
   name:        string
   color:       string
   geojson:     GeoJSON.FeatureCollection
@@ -23,6 +25,7 @@ interface MapLayer {
   source:      "drawn" | "upload" | "sample"
   totalAreaHa: number
   layerType:   LayerType
+  syncStatus?: SyncStatus      // undefined = not yet attempted
 }
 
 interface OverlapEntry {
@@ -57,6 +60,70 @@ function nextColor(layers: MapLayer[], type: LayerType): string {
   const pool = type === "restriction" ? RESTRICTION_COLORS : AOI_COLORS
   const used = layers.filter(l => l.layerType === type).length
   return pool[used % pool.length]
+}
+
+/**
+ * Reduces GeoJSON geometry precision/vertices so it fits within the API
+ * body limit (≤ 10 MB).  The full-resolution geometry is kept in memory
+ * for analysis; only the stored copy is simplified.
+ *
+ * Strategy:
+ *  1. If the serialised size is already ≤ 10 MB → return as-is
+ *  2. Otherwise round coordinates to 5 decimal places (~1 m precision)
+ *  3. If still too large, apply turf.simplify with increasing tolerance
+ */
+async function simplifyForStorage(
+  geojson: GeoJSON.FeatureCollection,
+  limitBytes = 10_000_000,
+): Promise<{ geojson: GeoJSON.FeatureCollection; simplified: boolean }> {
+  const serialize = (g: GeoJSON.FeatureCollection) => JSON.stringify(g)
+
+  if (new Blob([serialize(geojson)]).size <= limitBytes) {
+    return { geojson, simplified: false }
+  }
+
+  // Step 1 – round coordinates to 5 decimal places
+  function roundCoords(coords: unknown): unknown {
+    if (typeof coords === "number") return Math.round(coords * 1e5) / 1e5
+    if (Array.isArray(coords))     return coords.map(roundCoords)
+    return coords
+  }
+  let candidate: GeoJSON.FeatureCollection = {
+    ...geojson,
+    features: geojson.features.map(f => ({
+      ...f,
+      geometry: f.geometry
+        ? { ...f.geometry, coordinates: roundCoords((f.geometry as { coordinates: unknown }).coordinates) }
+        : f.geometry,
+    })) as GeoJSON.Feature[],
+  }
+  if (new Blob([serialize(candidate)]).size <= limitBytes) {
+    return { geojson: candidate, simplified: true }
+  }
+
+  // Step 2 – turf simplify with escalating tolerance
+  const turf = await import("@turf/turf")
+  const POLY_TYPES = ["Polygon", "MultiPolygon"]
+  for (const tolerance of [0.0001, 0.001, 0.005, 0.02, 0.1]) {
+    candidate = {
+      ...geojson,
+      features: geojson.features.map(f => {
+        if (!f.geometry || !POLY_TYPES.includes(f.geometry.type)) return f
+        try {
+          return turf.simplify(
+            f as GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>,
+            { tolerance, highQuality: false, mutate: false },
+          )
+        } catch { return f }
+      }),
+    }
+    if (new Blob([serialize(candidate)]).size <= limitBytes) {
+      return { geojson: candidate, simplified: true }
+    }
+  }
+
+  // Still too large — return best attempt (caller can decide)
+  return { geojson: candidate, simplified: true }
 }
 
 async function calcAreaHa(geojson: GeoJSON.FeatureCollection): Promise<number> {
@@ -202,6 +269,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               source:      ((meta.source as string) ?? "upload") as MapLayer["source"],
               totalAreaHa: areaHa,
               layerType:   (meta.layerType as LayerType) ?? null,
+              syncStatus:  "saved" as SyncStatus,
             })
           } catch { /* skip malformed records */ }
         }
@@ -257,25 +325,47 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     })
   }, [layers])
 
-  // ── Save a single layer to DB (background) ──────────────────────────────────
+  // ── Save a single layer to DB ────────────────────────────────────────────────
+  // • Marks the layer "saving" while in flight
+  // • Simplifies the GeoJSON if it exceeds ~10 MB (shapefiles can be very large)
+  // • Updates syncStatus to "saved" or "error" when done
   const saveLayerToDB = useCallback(async (layer: MapLayer): Promise<number | undefined> => {
-    if (!projectId) return undefined
+    if (!projectId) {
+      setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "local" } : l))
+      return undefined
+    }
+
+    // Mark as saving
+    setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "saving" } : l))
+
     try {
+      const { geojson: geojsonToSave } = await simplifyForStorage(layer.geojson)
+
       const res = await fetch("/api/aoi-analysis", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId,
           name:           layer.name,
-          geojson:        JSON.stringify(layer.geojson),
+          geojson:        JSON.stringify(geojsonToSave),
           sourceType:     "layer",
           analysisResult: { layerType: layer.layerType, color: layer.color, source: layer.source },
         }),
       })
-      if (!res.ok) return undefined
+
+      if (!res.ok) {
+        setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
+        return undefined
+      }
+
       const data = await res.json()
-      return data.id as number | undefined
-    } catch { return undefined }
+      const dbId = data.id as number | undefined
+      setLayers(p => p.map(l => l.id === layer.id ? { ...l, dbId, syncStatus: "saved" } : l))
+      return dbId
+    } catch {
+      setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
+      return undefined
+    }
   }, [projectId])
 
   // ── Toggle draw ─────────────────────────────────────────────────────────────
@@ -299,9 +389,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     setLayers(p => [...p, newLayer])
     drawnGroupRef.current?.clearLayers()
     setModal({ open: false }); setLabelInput("")
-    saveLayerToDB(newLayer).then(dbId => {
-      if (dbId) setLayers(p => p.map(l => l.id === newLayer.id ? { ...l, dbId } : l))
-    })
+    saveLayerToDB(newLayer)  // updates syncStatus + dbId internally
   }, [modal, labelInput, newLayerType, saveLayerToDB])
 
   // ── File upload + persist ───────────────────────────────────────────────────
@@ -327,9 +415,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     const name    = file.name.replace(/\.(geojson|json|zip|shp)$/i, "")
     const newLayer: MapLayer = { id: uuidv4(), name, color, geojson, visible: true, source: "upload", totalAreaHa: areaHa, layerType: type }
     setLayers(p => [...p, newLayer])
-    saveLayerToDB(newLayer).then(dbId => {
-      if (dbId) setLayers(p => p.map(l => l.id === newLayer.id ? { ...l, dbId } : l))
-    })
+    saveLayerToDB(newLayer)  // updates syncStatus + dbId internally
   }, [saveLayerToDB])
 
   // ── Load sample + persist ───────────────────────────────────────────────────
@@ -339,9 +425,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     const color   = nextColor(layersRef.current, type)
     const newLayer: MapLayer = { id: uuidv4(), name: label, color, geojson, visible: true, source: "sample", totalAreaHa: areaHa, layerType: type }
     setLayers(p => [...p, newLayer])
-    saveLayerToDB(newLayer).then(dbId => {
-      if (dbId) setLayers(p => p.map(l => l.id === newLayer.id ? { ...l, dbId } : l))
-    })
+    saveLayerToDB(newLayer)  // updates syncStatus + dbId internally
   }, [saveLayerToDB])
 
   // ── Zoom to layer ───────────────────────────────────────────────────────────
@@ -660,6 +744,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         onRemove={() => removeLayer(layer.id, layer.dbId)}
                         onSetType={t => setLayerType(layer.id, layer.dbId, t)}
                         onRename={n => renameLayer(layer.id, layer.dbId, n)}
+                        onRetrySync={() => saveLayerToDB(layer)}
                       />
                     ))}
                   </div>
@@ -874,13 +959,37 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   )
 }
 
+// ── SyncBadge ─────────────────────────────────────────────────────────────────
+
+function SyncBadge({ status, onRetry }: { status?: SyncStatus; onRetry: () => void }) {
+  if (!status || status === "saved") return (
+    <span title="Salvo no banco de dados">
+      <CloudCheck className="size-3 text-emerald-500" />
+    </span>
+  )
+  if (status === "saving") return <Loader2 className="size-3 animate-spin text-zinc-400" />
+  if (status === "local")  return (
+    <span title="Abra a partir de um projeto para salvar">
+      <CloudOff className="size-3 text-zinc-400" />
+    </span>
+  )
+  // error
+  return (
+    <button onClick={onRetry} title="Erro ao salvar — clique para tentar novamente"
+      className="flex items-center gap-0.5 text-amber-500 hover:text-amber-600 transition-colors">
+      <AlertCircle className="size-3" />
+      <RotateCcw   className="size-2.5" />
+    </button>
+  )
+}
+
 // ── LayerRow sub-component ────────────────────────────────────────────────────
 
 type LayerRowT = ReturnType<typeof th>
 
 function LayerRow({
   layer, isDark, T,
-  onToggleVisible, onZoom, onExport, onRemove, onSetType, onRename,
+  onToggleVisible, onZoom, onExport, onRemove, onSetType, onRename, onRetrySync,
 }: {
   layer: MapLayer; isDark: boolean; T: LayerRowT
   onToggleVisible: (v: boolean) => void
@@ -889,6 +998,7 @@ function LayerRow({
   onRemove: () => void
   onSetType: (t: LayerType) => void
   onRename: (name: string) => void
+  onRetrySync: () => void
 }) {
   const [editing,  setEditing]  = useState(false)
   const [editName, setEditName] = useState(layer.name)
@@ -900,25 +1010,30 @@ function LayerRow({
 
   return (
     <div className={cn("rounded-lg border p-2 group transition-colors", T.row)}>
-      {/* Top row: visibility + color + name + actions */}
+      {/* Top row */}
       <div className="flex items-center gap-1.5">
-        <button onClick={() => onToggleVisible(!layer.visible)} className="shrink-0" title={layer.visible ? "Ocultar" : "Mostrar"}>
+
+        {/* Visibility toggle */}
+        <button onClick={() => onToggleVisible(!layer.visible)} className="shrink-0"
+          title={layer.visible ? "Ocultar camada" : "Mostrar camada"}>
           {layer.visible
-            ? <Eye    className={cn("size-3.5", isDark ? "text-zinc-400" : "text-zinc-400")} />
+            ? <Eye    className={cn("size-3.5", T.muted)} />
             : <EyeOff className="size-3.5 text-zinc-300" />}
         </button>
 
+        {/* Color swatch */}
         <span className="size-2.5 rounded-sm shrink-0"
-          style={{ backgroundColor: layer.color, border: layer.layerType === "restriction" ? "1.5px dashed rgba(0,0,0,0.35)" : "none" }} />
+          style={{ backgroundColor: layer.color,
+            border: layer.layerType === "restriction" ? "1.5px dashed rgba(0,0,0,0.35)" : "none" }} />
 
+        {/* Name / inline edit */}
         {editing ? (
           <div className="flex-1 flex items-center gap-1 min-w-0">
             <input
-              autoFocus
-              value={editName}
+              autoFocus value={editName}
               onChange={e => setEditName(e.target.value)}
               onKeyDown={e => {
-                if (e.key === "Enter") confirmRename()
+                if (e.key === "Enter")  confirmRename()
                 if (e.key === "Escape") { setEditing(false); setEditName(layer.name) }
               }}
               className={cn("flex-1 text-xs px-1.5 py-0.5 rounded border min-w-0 focus:outline-none focus:ring-1", T.input)}
@@ -932,6 +1047,9 @@ function LayerRow({
             {layer.name}
           </span>
         )}
+
+        {/* Sync status badge (always visible, small) */}
+        <SyncBadge status={layer.syncStatus} onRetry={onRetrySync} />
 
         {/* Action buttons — visible on hover */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -962,14 +1080,18 @@ function LayerRow({
           className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors",
             layer.layerType === "aoi"
               ? "bg-blue-600 text-white border-blue-600"
-              : isDark ? "border-zinc-600 text-zinc-500 hover:border-blue-400 hover:text-blue-400" : "border-zinc-200 text-zinc-400 hover:border-blue-300 hover:text-blue-600")}>
+              : isDark
+                ? "border-zinc-600 text-zinc-500 hover:border-blue-400 hover:text-blue-400"
+                : "border-zinc-200 text-zinc-400 hover:border-blue-300 hover:text-blue-600")}>
           AOI
         </button>
         <button onClick={() => onSetType("restriction")}
           className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium transition-colors",
             layer.layerType === "restriction"
               ? "bg-red-600 text-white border-red-600"
-              : isDark ? "border-zinc-600 text-zinc-500 hover:border-red-400 hover:text-red-400" : "border-zinc-200 text-zinc-400 hover:border-red-300 hover:text-red-600")}>
+              : isDark
+                ? "border-zinc-600 text-zinc-500 hover:border-red-400 hover:text-red-400"
+                : "border-zinc-200 text-zinc-400 hover:border-red-300 hover:text-red-600")}>
           Restrição
         </button>
         <span className={cn("ml-auto text-[10px] tabular-nums", T.muted)}>
