@@ -26,6 +26,7 @@ interface MapLayer {
   totalAreaHa: number
   layerType:   LayerType
   syncStatus?: SyncStatus      // undefined = not yet attempted
+  blobUrl?:    string          // Vercel Blob URL when file was too large for API body
 }
 
 interface OverlapEntry {
@@ -62,19 +63,83 @@ function nextColor(layers: MapLayer[], type: LayerType): string {
   return pool[used % pool.length]
 }
 
+// ── Tiered-storage helpers ─────────────────────────────────────────────────────
+//
+// Strategy (decided at save time based on serialised GeoJSON size):
+//
+//   ≤ 800 KB  → send as plain JSON string in the API body
+//   800 KB – 4 MB → gzip-compress + base64-encode (native CompressionStream,
+//                   no extra library); payload shrinks ~10-20×
+//   > 4 MB    → upload directly to Vercel Blob (bypasses serverless body limit
+//               entirely); store the resulting URL in the DB instead of the data
+//
+// The full-resolution geometry is always kept in browser memory for analysis.
+
+const COMPRESS_THRESHOLD = 800_000    // bytes
+const BLOB_THRESHOLD     = 4_000_000  // bytes — Vercel Hobby API route body limit
+
+// ── gzip compression ──────────────────────────────────────────────────────────
+
+async function compressToBase64(text: string): Promise<string> {
+  const cs = new CompressionStream("gzip")
+  const writer = cs.writable.getWriter()
+  writer.write(new TextEncoder().encode(text))
+  writer.close()
+  const buf = await new Response(cs.readable).arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let binary = ""
+  for (let i = 0; i < bytes.length; i += 8192)
+    binary += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)))
+  return btoa(binary)
+}
+
+async function decompressFromBase64(b64: string): Promise<string> {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+  const ds = new DecompressionStream("gzip")
+  const writer = ds.writable.getWriter()
+  writer.write(bytes)
+  writer.close()
+  return new Response(ds.readable).text()
+}
+
+// ── Vercel Blob upload ────────────────────────────────────────────────────────
+
+async function uploadGeoJSONToBlob(geojsonStr: string, layerName: string): Promise<string> {
+  const { upload } = await import("@vercel/blob/client")
+  const safeName  = layerName.replace(/[^a-z0-9_-]/gi, "_").slice(0, 60)
+  const filename  = `geolayers/${safeName}_${Date.now()}.geojson`
+  const blob      = new Blob([geojsonStr], { type: "application/json" })
+  const result    = await upload(filename, blob, {
+    access:          "public",
+    handleUploadUrl: "/api/blob/upload",
+  })
+  return result.url
+}
+
+async function deleteBlobUrl(url: string): Promise<void> {
+  await fetch("/api/blob/delete", {
+    method:  "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ url }),
+  })
+}
+
 /**
  * Reduces GeoJSON geometry precision/vertices so it fits within the API
- * body limit (≤ 10 MB).  The full-resolution geometry is kept in memory
- * for analysis; only the stored copy is simplified.
+ * body limit (≤ 50 MB pre-compression).  The full-resolution geometry is
+ * kept in memory for analysis; only the stored copy is simplified.
  *
  * Strategy:
- *  1. If the serialised size is already ≤ 10 MB → return as-is
+ *  1. If the serialised size is already ≤ 50 MB → return as-is
  *  2. Otherwise round coordinates to 5 decimal places (~1 m precision)
  *  3. If still too large, apply turf.simplify with increasing tolerance
+ *
+ * Note: after this step, payloads are routed through the tiered-storage logic
+ * (compress or Vercel Blob upload) before being sent — see saveLayerToDB.
  */
 async function simplifyForStorage(
   geojson: GeoJSON.FeatureCollection,
-  limitBytes = 10_000_000,
+  limitBytes = 50_000_000,
 ): Promise<{ geojson: GeoJSON.FeatureCollection; simplified: boolean }> {
   const serialize = (g: GeoJSON.FeatureCollection) => JSON.stringify(g)
 
@@ -256,8 +321,25 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
         for (const record of data as Array<Record<string, unknown>>) {
           if (!record.geojson) continue
           try {
-            const geojson = JSON.parse(record.geojson as string) as GeoJSON.FeatureCollection
-            const meta    = (record.analysisResult ?? {}) as Record<string, unknown>
+            const meta       = (record.analysisResult ?? {}) as Record<string, unknown>
+            const rawGeojson = record.geojson as string
+
+            // Resolve the actual GeoJSON string based on storage tier
+            let geojsonStr: string
+            if (meta.storedInBlob === true) {
+              // Large file: fetch from Vercel Blob CDN
+              const r = await fetch(rawGeojson)
+              if (!r.ok) throw new Error(`Blob fetch failed: ${r.status}`)
+              geojsonStr = await r.text()
+            } else if (meta.compressed === true) {
+              // Medium file: decompress base64-encoded gzip
+              geojsonStr = await decompressFromBase64(rawGeojson)
+            } else {
+              // Small file: plain JSON string stored directly
+              geojsonStr = rawGeojson
+            }
+
+            const geojson = JSON.parse(geojsonStr) as GeoJSON.FeatureCollection
             const areaHa  = +(await calcAreaHa(geojson)).toFixed(2)
             restored.push({
               id:          uuidv4(),
@@ -270,6 +352,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               totalAreaHa: areaHa,
               layerType:   (meta.layerType as LayerType) ?? null,
               syncStatus:  "saved" as SyncStatus,
+              blobUrl:     meta.storedInBlob === true ? rawGeojson : undefined,
             })
           } catch { /* skip malformed records */ }
         }
@@ -300,7 +383,8 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
       layers.forEach((layer) => {
         const existing = layerMapRef.current.get(layer.id)
         if (existing) {
-          layer.visible ? map.addLayer(existing) : map.removeLayer(existing)
+          if (layer.visible) map.addLayer(existing)
+          else               map.removeLayer(existing)
           return
         }
         if (!layer.visible) return
@@ -340,6 +424,30 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
     try {
       const { geojson: geojsonToSave } = await simplifyForStorage(layer.geojson)
+      const geojsonStr  = JSON.stringify(geojsonToSave)
+      const sizeBytes   = new Blob([geojsonStr]).size
+
+      // ── Tier 1: large file → upload directly to Vercel Blob ──────────────────
+      // Files > 4 MB cannot fit in a Vercel serverless function request body.
+      // We upload the GeoJSON straight to Vercel Blob CDN from the browser,
+      // then store only the resulting public URL in the database.
+      let geojsonPayload: string
+      let compressed   = false
+      let storedInBlob = false
+      let blobUrl: string | undefined
+
+      if (sizeBytes > BLOB_THRESHOLD) {
+        blobUrl        = await uploadGeoJSONToBlob(geojsonStr, layer.name)
+        geojsonPayload = blobUrl   // store the URL in the geojson column
+        storedInBlob   = true
+      } else if (sizeBytes > COMPRESS_THRESHOLD) {
+        // ── Tier 2: medium file → gzip + base64 ────────────────────────────────
+        geojsonPayload = await compressToBase64(geojsonStr)
+        compressed     = true
+      } else {
+        // ── Tier 3: small file → plain JSON string ──────────────────────────────
+        geojsonPayload = geojsonStr
+      }
 
       const res = await fetch("/api/aoi-analysis", {
         method:  "POST",
@@ -347,20 +455,30 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
         body: JSON.stringify({
           projectId,
           name:           layer.name,
-          geojson:        JSON.stringify(geojsonToSave),
+          geojson:        geojsonPayload,
           sourceType:     "layer",
-          analysisResult: { layerType: layer.layerType, color: layer.color, source: layer.source },
+          analysisResult: {
+            layerType: layer.layerType,
+            color:     layer.color,
+            source:    layer.source,
+            compressed,
+            storedInBlob,
+          },
         }),
       })
 
       if (!res.ok) {
+        // If we already uploaded to blob but DB insert failed, clean up the orphan
+        if (blobUrl) deleteBlobUrl(blobUrl).catch(() => {})
         setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
         return undefined
       }
 
       const data = await res.json()
       const dbId = data.id as number | undefined
-      setLayers(p => p.map(l => l.id === layer.id ? { ...l, dbId, syncStatus: "saved" } : l))
+      setLayers(p => p.map(l =>
+        l.id === layer.id ? { ...l, dbId, syncStatus: "saved", blobUrl } : l,
+      ))
       return dbId
     } catch {
       setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
@@ -435,8 +553,8 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     try { mapRef.current.fitBounds(gl.getBounds(), { padding: [40, 40] }) } catch { /* empty */ }
   }, [])
 
-  // ── Remove layer + delete from DB ───────────────────────────────────────────
-  const removeLayer = useCallback((id: string, dbId?: number) => {
+  // ── Remove layer + delete from DB (and Vercel Blob if applicable) ───────────
+  const removeLayer = useCallback((id: string, dbId?: number, blobUrl?: string) => {
     const gl = layerMapRef.current.get(id)
     if (gl && mapRef.current) mapRef.current.removeLayer(gl)
     layerMapRef.current.delete(id)
@@ -444,6 +562,9 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     if (dbId && projectId) {
       fetch(`/api/aoi-analysis/${dbId}`, { method: "DELETE" }).catch(() => {})
     }
+    // If the GeoJSON was stored in Vercel Blob, delete the object too so we
+    // don't accumulate orphaned files in storage.
+    if (blobUrl) deleteBlobUrl(blobUrl).catch(() => {})
   }, [projectId])
 
   // ── Rename layer + patch DB ─────────────────────────────────────────────────
@@ -741,7 +862,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         onToggleVisible={v => setLayers(p => p.map(l => l.id === layer.id ? { ...l, visible: v } : l))}
                         onZoom={() => zoomTo(layer.id)}
                         onExport={() => downloadGeoJSON(layer.geojson, `${layer.name.replace(/\s+/g,"_")}.geojson`)}
-                        onRemove={() => removeLayer(layer.id, layer.dbId)}
+                        onRemove={() => removeLayer(layer.id, layer.dbId, layer.blobUrl)}
                         onSetType={t => setLayerType(layer.id, layer.dbId, t)}
                         onRename={n => renameLayer(layer.id, layer.dbId, n)}
                         onRetrySync={() => saveLayerToDB(layer)}
@@ -962,7 +1083,9 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 // ── SyncBadge ─────────────────────────────────────────────────────────────────
 
 function SyncBadge({ status, onRetry }: { status?: SyncStatus; onRetry: () => void }) {
-  if (!status || status === "saved") return (
+  // undefined = save not yet attempted (e.g. layer just added, save call in flight)
+  if (!status)             return null
+  if (status === "saved")  return (
     <span title="Salvo no banco de dados">
       <CloudCheck className="size-3 text-emerald-500" />
     </span>
@@ -973,7 +1096,7 @@ function SyncBadge({ status, onRetry }: { status?: SyncStatus; onRetry: () => vo
       <CloudOff className="size-3 text-zinc-400" />
     </span>
   )
-  // error
+  // error — show retry button
   return (
     <button onClick={onRetry} title="Erro ao salvar — clique para tentar novamente"
       className="flex items-center gap-0.5 text-amber-500 hover:text-amber-600 transition-colors">
