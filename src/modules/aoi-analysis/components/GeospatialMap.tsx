@@ -26,6 +26,7 @@ interface MapLayer {
   totalAreaHa: number
   layerType:   LayerType
   syncStatus?: SyncStatus      // undefined = not yet attempted
+  syncError?:  string          // error message when syncStatus === "error"
   blobUrl?:    string          // Vercel Blob URL when file was too large for API body
 }
 
@@ -109,11 +110,18 @@ async function uploadGeoJSONToBlob(geojsonStr: string, layerName: string): Promi
   const safeName  = layerName.replace(/[^a-z0-9_-]/gi, "_").slice(0, 60)
   const filename  = `geolayers/${safeName}_${Date.now()}.geojson`
   const blob      = new Blob([geojsonStr], { type: "application/json" })
-  const result    = await upload(filename, blob, {
-    access:          "public",
-    handleUploadUrl: "/api/blob/upload",
-  })
-  return result.url
+  try {
+    const result = await upload(filename, blob, {
+      access:          "public",
+      handleUploadUrl: "/api/blob/upload",
+    })
+    return result.url
+  } catch (err) {
+    // Surface a useful message — the raw error from @vercel/blob often says
+    // "No BLOB_READ_WRITE_TOKEN" or contains the server response body.
+    const raw = err instanceof Error ? err.message : String(err)
+    throw new Error(`Blob upload falhou: ${raw}`)
+  }
 }
 
 async function deleteBlobUrl(url: string): Promise<void> {
@@ -426,26 +434,28 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
       const { geojson: geojsonToSave } = await simplifyForStorage(layer.geojson)
       const geojsonStr  = JSON.stringify(geojsonToSave)
       const sizeBytes   = new Blob([geojsonStr]).size
+      const sizeMB      = (sizeBytes / 1_048_576).toFixed(2)
 
-      // ── Tier 1: large file → upload directly to Vercel Blob ──────────────────
-      // Files > 4 MB cannot fit in a Vercel serverless function request body.
-      // We upload the GeoJSON straight to Vercel Blob CDN from the browser,
-      // then store only the resulting public URL in the database.
+      // ── Tier selection ────────────────────────────────────────────────────────
       let geojsonPayload: string
       let compressed   = false
       let storedInBlob = false
       let blobUrl: string | undefined
 
       if (sizeBytes > BLOB_THRESHOLD) {
+        // Tier 1 — large file: upload directly to Vercel Blob CDN
+        console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → Vercel Blob`)
         blobUrl        = await uploadGeoJSONToBlob(geojsonStr, layer.name)
-        geojsonPayload = blobUrl   // store the URL in the geojson column
+        geojsonPayload = blobUrl
         storedInBlob   = true
       } else if (sizeBytes > COMPRESS_THRESHOLD) {
-        // ── Tier 2: medium file → gzip + base64 ────────────────────────────────
+        // Tier 2 — medium file: gzip + base64
+        console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → gzip compress`)
         geojsonPayload = await compressToBase64(geojsonStr)
         compressed     = true
       } else {
-        // ── Tier 3: small file → plain JSON string ──────────────────────────────
+        // Tier 3 — small file: plain JSON
+        console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → plain JSON`)
         geojsonPayload = geojsonStr
       }
 
@@ -470,18 +480,31 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
       if (!res.ok) {
         // If we already uploaded to blob but DB insert failed, clean up the orphan
         if (blobUrl) deleteBlobUrl(blobUrl).catch(() => {})
-        setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
+        let errMsg = `Erro ${res.status} ao salvar no banco`
+        try {
+          const errBody = await res.json() as { error?: string }
+          if (errBody.error) errMsg = errBody.error
+        } catch { /* ignore */ }
+        console.error(`[saveLayer] DB insert failed:`, errMsg)
+        setLayers(p => p.map(l =>
+          l.id === layer.id ? { ...l, syncStatus: "error", syncError: errMsg } : l,
+        ))
         return undefined
       }
 
       const data = await res.json()
       const dbId = data.id as number | undefined
+      console.log(`[saveLayer] "${layer.name}" saved — dbId=${dbId}${blobUrl ? " blobUrl=" + blobUrl : ""}`)
       setLayers(p => p.map(l =>
-        l.id === layer.id ? { ...l, dbId, syncStatus: "saved", blobUrl } : l,
+        l.id === layer.id ? { ...l, dbId, syncStatus: "saved", syncError: undefined, blobUrl } : l,
       ))
       return dbId
-    } catch {
-      setLayers(p => p.map(l => l.id === layer.id ? { ...l, syncStatus: "error" } : l))
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Erro desconhecido ao salvar camada"
+      console.error(`[saveLayer] "${layer.name}" failed:`, err)
+      setLayers(p => p.map(l =>
+        l.id === layer.id ? { ...l, syncStatus: "error", syncError: errMsg } : l,
+      ))
       return undefined
     }
   }, [projectId])
@@ -767,6 +790,25 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               </button>
             </div>
           </div>
+
+          {/* ── Error banner ─────────────────────────────────────────────── */}
+          {layers.some(l => l.syncStatus === "error") && (() => {
+            const errLayer = layers.find(l => l.syncStatus === "error")!
+            return (
+              <div className="mx-3 mt-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2 flex-shrink-0">
+                <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold">Falha ao salvar &ldquo;{errLayer.name}&rdquo;</p>
+                  {errLayer.syncError && (
+                    <p className="mt-0.5 text-red-600 break-words">{errLayer.syncError}</p>
+                  )}
+                  <p className="mt-1 text-red-500">
+                    Verifique o console do browser (F12) para mais detalhes.
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Scrollable body */}
           <div className="flex-1 overflow-y-auto min-h-0">
@@ -1082,24 +1124,33 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
 // ── SyncBadge ─────────────────────────────────────────────────────────────────
 
-function SyncBadge({ status, onRetry }: { status?: SyncStatus; onRetry: () => void }) {
-  // undefined = save not yet attempted (e.g. layer just added, save call in flight)
+function SyncBadge({ status, errorMsg, onRetry }: {
+  status?:   SyncStatus
+  errorMsg?: string
+  onRetry:   () => void
+}) {
+  // undefined = save not yet attempted
   if (!status)             return null
   if (status === "saved")  return (
     <span title="Salvo no banco de dados">
       <CloudCheck className="size-3 text-emerald-500" />
     </span>
   )
-  if (status === "saving") return <Loader2 className="size-3 animate-spin text-zinc-400" />
+  if (status === "saving") return (
+    <span title="Salvando…">
+      <Loader2 className="size-3 animate-spin text-zinc-400" />
+    </span>
+  )
   if (status === "local")  return (
     <span title="Abra a partir de um projeto para salvar">
       <CloudOff className="size-3 text-zinc-400" />
     </span>
   )
-  // error — show retry button
+  // error — show retry button with the actual error in the tooltip
+  const tip = errorMsg ? `Erro: ${errorMsg}\nClique para tentar novamente` : "Erro ao salvar — clique para tentar novamente"
   return (
-    <button onClick={onRetry} title="Erro ao salvar — clique para tentar novamente"
-      className="flex items-center gap-0.5 text-amber-500 hover:text-amber-600 transition-colors">
+    <button onClick={onRetry} title={tip}
+      className="flex items-center gap-0.5 text-red-500 hover:text-red-600 transition-colors">
       <AlertCircle className="size-3" />
       <RotateCcw   className="size-2.5" />
     </button>
@@ -1172,7 +1223,7 @@ function LayerRow({
         )}
 
         {/* Sync status badge (always visible, small) */}
-        <SyncBadge status={layer.syncStatus} onRetry={onRetrySync} />
+        <SyncBadge status={layer.syncStatus} errorMsg={layer.syncError} onRetry={onRetrySync} />
 
         {/* Action buttons — visible on hover */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
