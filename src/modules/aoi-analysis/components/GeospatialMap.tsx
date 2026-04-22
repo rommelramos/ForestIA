@@ -25,9 +25,10 @@ interface MapLayer {
   source:      "drawn" | "upload" | "sample"
   totalAreaHa: number
   layerType:   LayerType
-  syncStatus?: SyncStatus      // undefined = not yet attempted
-  syncError?:  string          // error message when syncStatus === "error"
-  blobUrl?:    string          // Vercel Blob URL when file was too large for API body
+  syncStatus?:    SyncStatus   // undefined = not yet attempted
+  syncError?:     string       // error message when syncStatus === "error"
+  syncWarning?:   string       // non-blocking warning (e.g. saved with simplified geometry)
+  blobUrl?:       string       // Vercel Blob URL when file was too large for API body
 }
 
 interface OverlapEntry {
@@ -444,10 +445,31 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
       if (sizeBytes > BLOB_THRESHOLD) {
         // Tier 1 — large file: upload directly to Vercel Blob CDN
-        console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → Vercel Blob`)
-        blobUrl        = await uploadGeoJSONToBlob(geojsonStr, layer.name)
-        geojsonPayload = blobUrl
-        storedInBlob   = true
+        console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → Vercel Blob (tentando…)`)
+        try {
+          blobUrl        = await uploadGeoJSONToBlob(geojsonStr, layer.name)
+          geojsonPayload = blobUrl
+          storedInBlob   = true
+          console.log(`[saveLayer] Blob OK → ${blobUrl}`)
+        } catch (blobErr) {
+          // Blob failed (CORS/token/config) — fallback: simplify aggressively
+          // so the payload fits inside the 4.5 MB API-route body limit.
+          const blobErrMsg = blobErr instanceof Error ? blobErr.message : String(blobErr)
+          console.warn(`[saveLayer] Blob upload falhou (${blobErrMsg}), aplicando simplificação de emergência…`)
+          const { geojson: tiny } = await simplifyForStorage(layer.geojson, 3_500_000)
+          const tinyStr  = JSON.stringify(tiny)
+          const tinySize = new Blob([tinyStr]).size
+          console.log(`[saveLayer] após simplificação: ${(tinySize / 1_048_576).toFixed(2)} MB → gzip`)
+          geojsonPayload = await compressToBase64(tinyStr)
+          compressed     = true
+          storedInBlob   = false
+          // Flag so the UI can warn the user that geometry was simplified
+          setLayers(p => p.map(l => l.id === layer.id
+            ? { ...l, syncWarning: "Geometria simplificada (Vercel Blob indisponível). Configure BLOB_READ_WRITE_TOKEN na Vercel para salvar em alta resolução." }
+            : l,
+          ))
+          console.warn("[saveLayer] Camada salva com geometria simplificada. Configure BLOB_READ_WRITE_TOKEN na Vercel.")
+        }
       } else if (sizeBytes > COMPRESS_THRESHOLD) {
         // Tier 2 — medium file: gzip + base64
         console.log(`[saveLayer] "${layer.name}" ${sizeMB} MB → gzip compress`)
@@ -1124,18 +1146,27 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
 // ── SyncBadge ─────────────────────────────────────────────────────────────────
 
-function SyncBadge({ status, errorMsg, onRetry }: {
-  status?:   SyncStatus
-  errorMsg?: string
-  onRetry:   () => void
+function SyncBadge({ status, errorMsg, warningMsg, onRetry }: {
+  status?:    SyncStatus
+  errorMsg?:  string
+  warningMsg?: string
+  onRetry:    () => void
 }) {
   // undefined = save not yet attempted
-  if (!status)             return null
-  if (status === "saved")  return (
-    <span title="Salvo no banco de dados">
-      <CloudCheck className="size-3 text-emerald-500" />
-    </span>
-  )
+  if (!status) return null
+
+  if (status === "saved") {
+    if (warningMsg) return (
+      <span title={warningMsg}>
+        <AlertCircle className="size-3 text-amber-400" />
+      </span>
+    )
+    return (
+      <span title="Salvo no banco de dados">
+        <CloudCheck className="size-3 text-emerald-500" />
+      </span>
+    )
+  }
   if (status === "saving") return (
     <span title="Salvando…">
       <Loader2 className="size-3 animate-spin text-zinc-400" />
@@ -1147,7 +1178,9 @@ function SyncBadge({ status, errorMsg, onRetry }: {
     </span>
   )
   // error — show retry button with the actual error in the tooltip
-  const tip = errorMsg ? `Erro: ${errorMsg}\nClique para tentar novamente` : "Erro ao salvar — clique para tentar novamente"
+  const tip = errorMsg
+    ? `Erro: ${errorMsg}\nClique para tentar novamente`
+    : "Erro ao salvar — clique para tentar novamente"
   return (
     <button onClick={onRetry} title={tip}
       className="flex items-center gap-0.5 text-red-500 hover:text-red-600 transition-colors">
@@ -1223,7 +1256,7 @@ function LayerRow({
         )}
 
         {/* Sync status badge (always visible, small) */}
-        <SyncBadge status={layer.syncStatus} errorMsg={layer.syncError} onRetry={onRetrySync} />
+        <SyncBadge status={layer.syncStatus} errorMsg={layer.syncError} warningMsg={layer.syncWarning} onRetry={onRetrySync} />
 
         {/* Action buttons — visible on hover */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">

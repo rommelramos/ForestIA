@@ -17,29 +17,45 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
   }
 
-  const body = (await request.json()) as HandleUploadBody
+  // Fail fast with a clear message if the token is missing — avoids the
+  // confusing CORS error the browser shows when Vercel returns 400 without
+  // Access-Control-Allow-Origin headers.
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return NextResponse.json(
+      {
+        error:       "BLOB_READ_WRITE_TOKEN não configurado no servidor.",
+        instruction: "Acesse Vercel Dashboard → ForestIA → Settings → Environment Variables e adicione o token do Blob Store.",
+      },
+      { status: 503 },
+    )
+  }
+
+  let body: HandleUploadBody
+  try {
+    body = (await request.json()) as HandleUploadBody
+  } catch {
+    return NextResponse.json({ error: "JSON inválido no corpo da requisição" }, { status: 400 })
+  }
 
   try {
     const jsonResponse = await handleUpload({
       body,
       request,
       onBeforeGenerateToken: async (_pathname) => {
-        // Only allow GeoJSON / plain-text uploads; cap at 200 MB
         return {
-          allowedContentTypes: ["application/json", "text/plain"],
+          // Accept GeoJSON or plain text; allow up to 200 MB per file
+          allowedContentTypes: ["application/json", "text/plain", "application/octet-stream"],
           maximumSizeInBytes:  200 * 1024 * 1024,
         }
       },
       onUploadCompleted: async ({ blob }) => {
-        // Optional: log or record the completed upload
         console.log("[blob] upload completed:", blob.url)
       },
     })
     return NextResponse.json(jsonResponse)
   } catch (error) {
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 400 },
-    )
+    const msg = (error as Error).message ?? "Erro ao gerar token de upload"
+    console.error("[blob/upload] handleUpload error:", msg)
+    return NextResponse.json({ error: msg }, { status: 400 })
   }
 }
