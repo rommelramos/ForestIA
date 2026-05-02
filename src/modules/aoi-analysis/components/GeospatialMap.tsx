@@ -62,17 +62,36 @@ const AOI_COLORS         = ["#2563eb","#0891b2","#7c3aed","#0f766e","#1d4ed8"]
 const RESTRICTION_COLORS = ["#dc2626","#ea580c","#db2777","#b45309","#9333ea"]
 
 // ── Spectral overlay definitions ───────────────────────────────────────────────
+// When NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID is set, NDVI/EVI/moisture overlays
+// are served from Sentinel Hub WMS (Sentinel-2, 10 m resolution) instead of
+// NASA GIBS MODIS (250–1 km). The remaining overlays (LST, land-use, PRODES)
+// always use their canonical free sources.
 
-const SPECTRAL_OVERLAYS = [
-  { id: "ndvi",    label: "NDVI",        sublabel: "Vegetação (MODIS)",    color: "#22c55e", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_NDVI_8Day",            format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
-  { id: "evi",     label: "EVI",         sublabel: "Veg. Aprimorado",      color: "#16a34a", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_EVI_8Day",             format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
-  { id: "lst",     label: "Temperatura", sublabel: "Superfície (LST)",     color: "#f97316", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_Land_Surface_Temp_Day", format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
-  { id: "landuse", label: "Uso do Solo", sublabel: "MapBiomas Col. 9",     color: "#78350f", wmsUrl: "https://ows.mapbiomas.org/geoserver/mapbiomas/wms",            layers: "mapbiomas-brazil-collection9",     format: "image/png", attribution: "MapBiomas",       usesTime: false },
-  { id: "prodes",  label: "Desmatamento",sublabel: "INPE PRODES Amazônia", color: "#dc2626", wmsUrl: "https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon/wms", layers: "yearly_deforestation",            format: "image/png", attribution: "INPE",            usesTime: false },
-  { id: "water",   label: "Água (NDWI)", sublabel: "Corpos hídricos",      color: "#0ea5e9", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Water_Mask",                format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: false },
-] as const
-type OverlayId = typeof SPECTRAL_OVERLAYS[number]["id"]
+type OverlayId = "ndvi" | "evi" | "lst" | "moisture" | "landuse" | "prodes"
 
+interface OverlayDef {
+  id:          OverlayId
+  label:       string
+  sublabel:    string
+  color:       string
+  wmsUrl:      string
+  layers:      string
+  format:      string
+  attribution: string
+  /** MODIS needs TIME=<8-day period>; SH needs TIME=<from>/<to> */
+  timeMode:    "modis" | "sh-range" | "none"
+  /** Sentinel Hub only: add MAXCC param */
+  maxcc?:      number
+  /** Which service powers this overlay */
+  source:      "sentinel-hub" | "nasa-gibs" | "mapbiomas" | "inpe"
+}
+
+const SH_INSTANCE_ID = process.env.NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID ?? ""
+const SH_WMS         = SH_INSTANCE_ID
+  ? `https://services.sentinel-hub.com/ogc/wms/${SH_INSTANCE_ID}`
+  : null
+
+/** Returns the most-recent valid MODIS 8-day composite date */
 function getModisDate(): string {
   const now   = new Date()
   const start = new Date(now.getFullYear(), 0, 1)
@@ -81,6 +100,67 @@ function getModisDate(): string {
   const d = new Date(now.getFullYear(), 0, 1 + period)
   return d.toISOString().split("T")[0]
 }
+
+/** Returns a 30-day date range for Sentinel Hub WMS */
+function getSHTimeRange(): string {
+  const now  = new Date()
+  const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+  return `${past.toISOString().split("T")[0]}/${now.toISOString().split("T")[0]}`
+}
+
+const SPECTRAL_OVERLAYS: OverlayDef[] = [
+  {
+    id: "ndvi", label: "NDVI", color: "#22c55e", format: "image/png",
+    sublabel:    SH_WMS ? "Sentinel-2 10 m" : "MODIS Terra 250 m",
+    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      SH_WMS ? "NDVI"                : "MODIS_Terra_NDVI_8Day",
+    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
+    timeMode:    SH_WMS ? "sh-range" : "modis",
+    maxcc:       SH_WMS ? 20 : undefined,
+    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+  },
+  {
+    id: "evi", label: "EVI", color: "#16a34a", format: "image/png",
+    sublabel:    SH_WMS ? "Sentinel-2 / FALSE COLOR" : "MODIS Terra 500 m",
+    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      SH_WMS ? "FALSE_COLOR"        : "MODIS_Terra_EVI_8Day",
+    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
+    timeMode:    SH_WMS ? "sh-range" : "modis",
+    maxcc:       SH_WMS ? 20 : undefined,
+    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+  },
+  {
+    id: "moisture", label: "Umidade / NDWI", color: "#0ea5e9", format: "image/png",
+    sublabel:    SH_WMS ? "Sentinel-2 MOISTURE INDEX" : "MODIS Water Mask",
+    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      SH_WMS ? "MOISTURE_INDEX"    : "MODIS_Water_Mask",
+    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
+    timeMode:    SH_WMS ? "sh-range" : "none",
+    maxcc:       SH_WMS ? 20 : undefined,
+    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+  },
+  {
+    id: "lst", label: "Temperatura (LST)", sublabel: "MODIS Terra 1 km",
+    color: "#f97316", format: "image/png",
+    wmsUrl:      "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      "MODIS_Terra_Land_Surface_Temp_Day",
+    attribution: "NASA GIBS / MODIS", timeMode: "modis", source: "nasa-gibs",
+  },
+  {
+    id: "landuse", label: "Uso do Solo", sublabel: "MapBiomas Col. 9",
+    color: "#78350f", format: "image/png",
+    wmsUrl:      "https://ows.mapbiomas.org/geoserver/mapbiomas/wms",
+    layers:      "mapbiomas-brazil-collection9",
+    attribution: "MapBiomas", timeMode: "none", source: "mapbiomas",
+  },
+  {
+    id: "prodes", label: "Desmatamento", sublabel: "INPE PRODES Amazônia",
+    color: "#dc2626", format: "image/png",
+    wmsUrl:      "https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon/wms",
+    layers:      "yearly_deforestation",
+    attribution: "INPE", timeMode: "none", source: "inpe",
+  },
+]
 
 function nextColor(layers: MapLayer[], type: LayerType): string {
   const pool = type === "restriction" ? RESTRICTION_COLORS : AOI_COLORS
@@ -417,7 +497,8 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     const map = mapRef.current
     if (!map) return
     import("leaflet").then((L) => {
-      const modisDate = getModisDate()
+      const modisDate   = getModisDate()
+      const shTimeRange = getSHTimeRange()
 
       SPECTRAL_OVERLAYS.forEach(overlay => {
         const active   = activeOverlays.has(overlay.id)
@@ -425,7 +506,6 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
         if (active) {
           if (existing) {
-            // Update opacity only
             existing.setOpacity(overlayOpacity)
           } else {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -437,7 +517,11 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               version:     "1.1.1",
               attribution: overlay.attribution,
             }
-            if (overlay.usesTime) opts.time = modisDate
+            // Attach the correct TIME parameter per source
+            if (overlay.timeMode === "modis")    opts.time  = modisDate
+            if (overlay.timeMode === "sh-range") opts.time  = shTimeRange
+            // Sentinel Hub needs MAXCC to filter cloudy scenes
+            if (overlay.maxcc !== undefined)     opts.maxcc = overlay.maxcc
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
             wmsLayer.addTo(map)
@@ -996,9 +1080,12 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                           className="size-2.5 rounded-sm shrink-0"
                           style={{ backgroundColor: ov.color }}
                         />
-                        <span className="flex-1 text-left">
+                        <span className="flex-1 text-left min-w-0">
                           <span className="font-medium">{ov.label}</span>
-                          <span className={cn("ml-1.5 text-[10px]", isOn ? "text-emerald-500" : T.muted)}>
+                          {ov.source === "sentinel-hub" && (
+                            <span className="ml-1.5 inline-block text-[8px] font-bold px-1 py-px rounded bg-blue-600 text-white leading-none align-middle">SH</span>
+                          )}
+                          <span className={cn("block text-[10px] truncate mt-px", isOn ? "text-emerald-500" : T.muted)}>
                             {ov.sublabel}
                           </span>
                         </span>
