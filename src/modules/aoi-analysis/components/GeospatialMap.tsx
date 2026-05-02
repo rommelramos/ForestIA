@@ -5,9 +5,11 @@ import {
   Pencil, Upload, Ban, TreePine, Target, Download, Trash2,
   Sun, Moon, ChevronLeft, ChevronRight, Eye, EyeOff, Layers,
   Zap, X, Save, MapPin, Edit2, Loader2, Check, CloudOff,
-  AlertCircle, RotateCcw, CloudCheck,
+  AlertCircle, RotateCcw, CloudCheck, BarChart2, ChevronDown,
+  FlaskConical,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { LayerAnalysisModal } from "./LayerAnalysisModal"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,27 @@ type BaseKey = keyof typeof BASE_LAYERS
 
 const AOI_COLORS         = ["#2563eb","#0891b2","#7c3aed","#0f766e","#1d4ed8"]
 const RESTRICTION_COLORS = ["#dc2626","#ea580c","#db2777","#b45309","#9333ea"]
+
+// ── Spectral overlay definitions ───────────────────────────────────────────────
+
+const SPECTRAL_OVERLAYS = [
+  { id: "ndvi",    label: "NDVI",        sublabel: "Vegetação (MODIS)",    color: "#22c55e", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_NDVI_8Day",            format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
+  { id: "evi",     label: "EVI",         sublabel: "Veg. Aprimorado",      color: "#16a34a", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_EVI_8Day",             format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
+  { id: "lst",     label: "Temperatura", sublabel: "Superfície (LST)",     color: "#f97316", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Terra_Land_Surface_Temp_Day", format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: true  },
+  { id: "landuse", label: "Uso do Solo", sublabel: "MapBiomas Col. 9",     color: "#78350f", wmsUrl: "https://ows.mapbiomas.org/geoserver/mapbiomas/wms",            layers: "mapbiomas-brazil-collection9",     format: "image/png", attribution: "MapBiomas",       usesTime: false },
+  { id: "prodes",  label: "Desmatamento",sublabel: "INPE PRODES Amazônia", color: "#dc2626", wmsUrl: "https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon/wms", layers: "yearly_deforestation",            format: "image/png", attribution: "INPE",            usesTime: false },
+  { id: "water",   label: "Água (NDWI)", sublabel: "Corpos hídricos",      color: "#0ea5e9", wmsUrl: "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi", layers: "MODIS_Water_Mask",                format: "image/png", attribution: "NASA GIBS/MODIS", usesTime: false },
+] as const
+type OverlayId = typeof SPECTRAL_OVERLAYS[number]["id"]
+
+function getModisDate(): string {
+  const now   = new Date()
+  const start = new Date(now.getFullYear(), 0, 1)
+  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000)
+  const period    = Math.floor(dayOfYear / 8) * 8
+  const d = new Date(now.getFullYear(), 0, 1 + period)
+  return d.toISOString().split("T")[0]
+}
 
 function nextColor(layers: MapLayer[], type: LayerType): string {
   const pool = type === "restriction" ? RESTRICTION_COLORS : AOI_COLORS
@@ -238,14 +261,15 @@ function th(dk: boolean) {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSaved?: () => void }) {
-  const containerRef   = useRef<HTMLDivElement>(null)
-  const mapRef         = useRef<import("leaflet").Map | null>(null)
-  const baseTileRef    = useRef<import("leaflet").TileLayer | null>(null)
-  const drawnGroupRef  = useRef<import("leaflet").FeatureGroup | null>(null)
-  const layerMapRef    = useRef<Map<string, import("leaflet").GeoJSON>>(new Map())
-  const interGroupRef  = useRef<import("leaflet").FeatureGroup | null>(null)
-  const drawCtrlObj    = useRef<{ ctrl: unknown }>({ ctrl: null })
-  const layersRef      = useRef<MapLayer[]>([])
+  const containerRef      = useRef<HTMLDivElement>(null)
+  const mapRef            = useRef<import("leaflet").Map | null>(null)
+  const baseTileRef       = useRef<import("leaflet").TileLayer | null>(null)
+  const drawnGroupRef     = useRef<import("leaflet").FeatureGroup | null>(null)
+  const layerMapRef       = useRef<Map<string, import("leaflet").GeoJSON>>(new Map())
+  const interGroupRef     = useRef<import("leaflet").FeatureGroup | null>(null)
+  const drawCtrlObj       = useRef<{ ctrl: unknown }>({ ctrl: null })
+  const layersRef         = useRef<MapLayer[]>([])
+  const overlayLayerMapRef = useRef<Map<string, import("leaflet").TileLayer>>(new Map())
 
   const [layers,       setLayers]      = useState<MapLayer[]>([])
   const [mapReady,     setMapReady]    = useState(false)
@@ -261,6 +285,10 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const [theme,        setTheme]       = useState<Theme>("light")
   const [panelOpen,    setPanelOpen]   = useState(true)
   const [loadingLayers,setLoadingLayers] = useState(false)
+  const [activeOverlays,  setActiveOverlays]  = useState<Set<OverlayId>>(new Set())
+  const [overlayOpacity,  setOverlayOpacity]  = useState(0.7)
+  const [overlaysOpen,    setOverlaysOpen]    = useState(false)
+  const [analysisModal,   setAnalysisModal]   = useState<{ open: boolean; layer?: MapLayer }>({ open: false })
 
   const dk = theme === "dark"
   const T  = th(dk)
@@ -383,6 +411,48 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
       baseTileRef.current = tile
     })
   }, [activeBase])
+
+  // ── Sync WMS spectral overlays ──────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    import("leaflet").then((L) => {
+      const modisDate = getModisDate()
+
+      SPECTRAL_OVERLAYS.forEach(overlay => {
+        const active   = activeOverlays.has(overlay.id)
+        const existing = overlayLayerMapRef.current.get(overlay.id)
+
+        if (active) {
+          if (existing) {
+            // Update opacity only
+            existing.setOpacity(overlayOpacity)
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const opts: Record<string, unknown> = {
+              layers:      overlay.layers,
+              format:      overlay.format,
+              transparent: true,
+              opacity:     overlayOpacity,
+              version:     "1.1.1",
+              attribution: overlay.attribution,
+            }
+            if (overlay.usesTime) opts.time = modisDate
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
+            wmsLayer.addTo(map)
+            overlayLayerMapRef.current.set(overlay.id, wmsLayer)
+          }
+        } else {
+          if (existing) {
+            map.removeLayer(existing)
+            overlayLayerMapRef.current.delete(overlay.id)
+          }
+        }
+      })
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOverlays, overlayOpacity])
 
   // ── Sync layers to map ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -883,6 +953,83 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                 onChange={e => handleFile(e, "restriction")} />
             </section>
 
+            {/* ── Spectral overlays ────────────────────────────────────── */}
+            <section className={cn("p-3 border-b", T.section)}>
+              <button
+                onClick={() => setOverlaysOpen(v => !v)}
+                className="flex w-full items-center justify-between"
+              >
+                <p className={cn("text-[10px] font-semibold uppercase tracking-widest flex items-center gap-1.5", T.label)}>
+                  <FlaskConical className="size-3" /> Filtros Espectrais
+                  {activeOverlays.size > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-bold leading-none">
+                      {activeOverlays.size}
+                    </span>
+                  )}
+                </p>
+                <ChevronDown className={cn("size-3 transition-transform", T.muted, overlaysOpen && "rotate-180")} />
+              </button>
+
+              {overlaysOpen && (
+                <div className="mt-2 space-y-1.5">
+                  {SPECTRAL_OVERLAYS.map(ov => {
+                    const isOn = activeOverlays.has(ov.id)
+                    return (
+                      <button
+                        key={ov.id}
+                        onClick={() => {
+                          setActiveOverlays(prev => {
+                            const next = new Set(prev)
+                            if (next.has(ov.id)) next.delete(ov.id)
+                            else next.add(ov.id)
+                            return next
+                          })
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 text-xs px-3 py-2 rounded-lg border transition-colors",
+                          isOn
+                            ? "border-emerald-600 bg-emerald-600/10 text-emerald-600"
+                            : T.btn,
+                        )}
+                      >
+                        <span
+                          className="size-2.5 rounded-sm shrink-0"
+                          style={{ backgroundColor: ov.color }}
+                        />
+                        <span className="flex-1 text-left">
+                          <span className="font-medium">{ov.label}</span>
+                          <span className={cn("ml-1.5 text-[10px]", isOn ? "text-emerald-500" : T.muted)}>
+                            {ov.sublabel}
+                          </span>
+                        </span>
+                        {isOn && <Check className="size-3 shrink-0 text-emerald-500" />}
+                      </button>
+                    )
+                  })}
+
+                  {activeOverlays.size > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <p className={cn("text-[10px]", T.muted)}>Opacidade</p>
+                        <p className={cn("text-[10px] tabular-nums font-medium", T.text)}>
+                          {Math.round(overlayOpacity * 100)}%
+                        </p>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={1.0}
+                        step={0.05}
+                        value={overlayOpacity}
+                        onChange={e => setOverlayOpacity(parseFloat(e.target.value))}
+                        className="w-full accent-emerald-600 h-1.5 cursor-pointer"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
             {/* Samples */}
             <section className={cn("p-3 border-b space-y-1.5", T.section)}>
               <p className={cn("text-[10px] font-semibold uppercase tracking-widest mb-2 flex items-center gap-1.5", T.label)}>
@@ -930,6 +1077,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         onSetType={t => setLayerType(layer.id, layer.dbId, t)}
                         onRename={n => renameLayer(layer.id, layer.dbId, n)}
                         onRetrySync={() => saveLayerToDB(layer)}
+                        onAnalyze={() => setAnalysisModal({ open: true, layer })}
                       />
                     ))}
                   </div>
@@ -1103,6 +1251,15 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
         </div>
       )}
 
+      {/* ── Layer analysis modal ────────────────────────────── */}
+      {analysisModal.open && analysisModal.layer && (
+        <LayerAnalysisModal
+          layer={analysisModal.layer}
+          isDark={dk}
+          onClose={() => setAnalysisModal({ open: false })}
+        />
+      )}
+
       {/* ── Draw polygon modal ──────────────────────────────── */}
       {modal.open && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4">
@@ -1196,7 +1353,7 @@ type LayerRowT = ReturnType<typeof th>
 
 function LayerRow({
   layer, isDark, T,
-  onToggleVisible, onZoom, onExport, onRemove, onSetType, onRename, onRetrySync,
+  onToggleVisible, onZoom, onExport, onRemove, onSetType, onRename, onRetrySync, onAnalyze,
 }: {
   layer: MapLayer; isDark: boolean; T: LayerRowT
   onToggleVisible: (v: boolean) => void
@@ -1206,6 +1363,7 @@ function LayerRow({
   onSetType: (t: LayerType) => void
   onRename: (name: string) => void
   onRetrySync: () => void
+  onAnalyze: () => void
 }) {
   const [editing,  setEditing]  = useState(false)
   const [editName, setEditName] = useState(layer.name)
@@ -1266,6 +1424,10 @@ function LayerRow({
               <Edit2 className="size-3" />
             </button>
           )}
+          <button onClick={onAnalyze} title="Analisar camada"
+            className={cn("size-5 flex items-center justify-center rounded hover:bg-black/10 transition-colors text-emerald-500 hover:text-emerald-400")}>
+            <BarChart2 className="size-3" />
+          </button>
           <button onClick={onZoom} title="Ir para localização"
             className={cn("size-5 flex items-center justify-center rounded hover:bg-black/10 transition-colors", T.muted)}>
             <Target className="size-3" />
