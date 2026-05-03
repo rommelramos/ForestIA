@@ -62,10 +62,8 @@ const AOI_COLORS         = ["#2563eb","#0891b2","#7c3aed","#0f766e","#1d4ed8"]
 const RESTRICTION_COLORS = ["#dc2626","#ea580c","#db2777","#b45309","#9333ea"]
 
 // ── Spectral overlay definitions ───────────────────────────────────────────────
-// When NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID is set, NDVI/EVI/moisture overlays
-// are served from Sentinel Hub WMS (Sentinel-2, 10 m resolution) instead of
-// NASA GIBS MODIS (250–1 km). The remaining overlays (LST, land-use, PRODES)
-// always use their canonical free sources.
+// Tile visualisation uses NASA GIBS / MODIS WMS (free, no auth required).
+// Pixel-level statistics (NDVI/EVI/etc.) are computed server-side via GEE.
 
 type OverlayId = "ndvi" | "evi" | "lst" | "moisture" | "landuse" | "prodes"
 
@@ -78,18 +76,11 @@ interface OverlayDef {
   layers:      string
   format:      string
   attribution: string
-  /** MODIS needs TIME=<8-day period>; SH needs TIME=<from>/<to> */
-  timeMode:    "modis" | "sh-range" | "none"
-  /** Sentinel Hub only: add MAXCC param */
-  maxcc?:      number
+  /** MODIS needs TIME=<8-day period>; "none" = no TIME param */
+  timeMode:    "modis" | "none"
   /** Which service powers this overlay */
-  source:      "sentinel-hub" | "nasa-gibs" | "mapbiomas" | "inpe"
+  source:      "nasa-gibs" | "mapbiomas" | "inpe"
 }
-
-const SH_INSTANCE_ID = process.env.NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID ?? ""
-const SH_WMS         = SH_INSTANCE_ID
-  ? `https://services.sentinel-hub.com/ogc/wms/${SH_INSTANCE_ID}`
-  : null
 
 /** Returns the most-recent valid MODIS 8-day composite date */
 function getModisDate(): string {
@@ -101,43 +92,33 @@ function getModisDate(): string {
   return d.toISOString().split("T")[0]
 }
 
-/** Returns a 30-day date range for Sentinel Hub WMS */
-function getSHTimeRange(): string {
-  const now  = new Date()
-  const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-  return `${past.toISOString().split("T")[0]}/${now.toISOString().split("T")[0]}`
-}
-
 const SPECTRAL_OVERLAYS: OverlayDef[] = [
   {
     id: "ndvi", label: "NDVI", color: "#22c55e", format: "image/png",
-    sublabel:    SH_WMS ? "Sentinel-2 10 m" : "MODIS Terra 250 m",
-    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
-    layers:      SH_WMS ? "NDVI"                : "MODIS_Terra_NDVI_8Day",
-    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
-    timeMode:    SH_WMS ? "sh-range" : "modis",
-    maxcc:       SH_WMS ? 20 : undefined,
-    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+    sublabel:    "MODIS Terra 250 m",
+    wmsUrl:      "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      "MODIS_Terra_NDVI_8Day",
+    attribution: "NASA GIBS / MODIS",
+    timeMode:    "modis",
+    source:      "nasa-gibs",
   },
   {
     id: "evi", label: "EVI", color: "#16a34a", format: "image/png",
-    sublabel:    SH_WMS ? "Sentinel-2 / FALSE COLOR" : "MODIS Terra 500 m",
-    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
-    layers:      SH_WMS ? "FALSE_COLOR"        : "MODIS_Terra_EVI_8Day",
-    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
-    timeMode:    SH_WMS ? "sh-range" : "modis",
-    maxcc:       SH_WMS ? 20 : undefined,
-    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+    sublabel:    "MODIS Terra 500 m",
+    wmsUrl:      "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      "MODIS_Terra_EVI_8Day",
+    attribution: "NASA GIBS / MODIS",
+    timeMode:    "modis",
+    source:      "nasa-gibs",
   },
   {
     id: "moisture", label: "Umidade / NDWI", color: "#0ea5e9", format: "image/png",
-    sublabel:    SH_WMS ? "Sentinel-2 MOISTURE INDEX" : "MODIS Water Mask",
-    wmsUrl:      SH_WMS ?? "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
-    layers:      SH_WMS ? "MOISTURE_INDEX"    : "MODIS_Water_Mask",
-    attribution: SH_WMS ? "Sentinel Hub / ESA Copernicus" : "NASA GIBS / MODIS",
-    timeMode:    SH_WMS ? "sh-range" : "none",
-    maxcc:       SH_WMS ? 20 : undefined,
-    source:      SH_WMS ? "sentinel-hub" : "nasa-gibs",
+    sublabel:    "MODIS Water Mask",
+    wmsUrl:      "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi",
+    layers:      "MODIS_Water_Mask",
+    attribution: "NASA GIBS / MODIS",
+    timeMode:    "none",
+    source:      "nasa-gibs",
   },
   {
     id: "lst", label: "Temperatura (LST)", sublabel: "MODIS Terra 1 km",
@@ -497,8 +478,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     const map = mapRef.current
     if (!map) return
     import("leaflet").then((L) => {
-      const modisDate   = getModisDate()
-      const shTimeRange = getSHTimeRange()
+      const modisDate = getModisDate()
 
       SPECTRAL_OVERLAYS.forEach(overlay => {
         const active   = activeOverlays.has(overlay.id)
@@ -517,11 +497,8 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               version:     "1.1.1",
               attribution: overlay.attribution,
             }
-            // Attach the correct TIME parameter per source
-            if (overlay.timeMode === "modis")    opts.time  = modisDate
-            if (overlay.timeMode === "sh-range") opts.time  = shTimeRange
-            // Sentinel Hub needs MAXCC to filter cloudy scenes
-            if (overlay.maxcc !== undefined)     opts.maxcc = overlay.maxcc
+            // MODIS composites need a specific 8-day period date
+            if (overlay.timeMode === "modis") opts.time = modisDate
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
             wmsLayer.addTo(map)
@@ -1082,9 +1059,6 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         />
                         <span className="flex-1 text-left min-w-0">
                           <span className="font-medium">{ov.label}</span>
-                          {ov.source === "sentinel-hub" && (
-                            <span className="ml-1.5 inline-block text-[8px] font-bold px-1 py-px rounded bg-blue-600 text-white leading-none align-middle">SH</span>
-                          )}
                           <span className={cn("block text-[10px] truncate mt-px", isOn ? "text-emerald-500" : T.muted)}>
                             {ov.sublabel}
                           </span>
