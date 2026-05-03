@@ -168,13 +168,24 @@ async function fetchSHStatistics(
     return bCount > aCount ? b : a
   })
 
+  // Debug: log the raw stats structure from SH to diagnose unexpected value types
+  console.log("[stats] SH interval sample:", JSON.stringify(best?.outputs?.ndvi?.bands?.B0?.stats))
+
+  // Safely convert any SH value to a rounded number.
+  // SH can return strings like "NaN" or objects in edge cases (all pixels masked).
+  // Number() handles strings; isNaN/isFinite guards against NaN/Infinity.
+  function safeNum(v: unknown, fallback = 0): number {
+    const n = Number(v ?? fallback)
+    return isNaN(n) || !isFinite(n) ? fallback : +n.toFixed(3)
+  }
+
   for (const indexId of ["ndvi","evi","savi","ndwi","nbr","ndmi"]) {
     const stats = best?.outputs?.[indexId]?.bands?.B0?.stats
     if (!stats) continue
     indices[indexId] = {
-      mean: +(stats.mean ?? 0).toFixed(3),
-      min:  +(stats.percentiles?.["10.0"] ?? stats.min ?? 0).toFixed(3),
-      max:  +(stats.percentiles?.["90.0"] ?? stats.max ?? 0).toFixed(3),
+      mean: safeNum(stats.mean),
+      min:  safeNum(stats.percentiles?.["10.0"] ?? stats.min),
+      max:  safeNum(stats.percentiles?.["90.0"] ?? stats.max),
       unit: "",
     }
   }
