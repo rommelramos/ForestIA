@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import {
   X, BarChart2, FlaskConical, Layers2, Droplets,
   Flame, TreePine, Activity, ExternalLink, AlertCircle,
+  CheckCircle2, WifiOff, RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -32,11 +33,14 @@ interface IndexResult {
   unit: string
 }
 
+type DataSource = "mock" | "sentinel-hub" | "sentinel-hub-error"
+
 interface AnalysisData {
-  indices: Record<string, IndexResult>
-  landuse: Record<string, number>
-  source:  "mock" | "sentinel"
-  note?:   string
+  indices:   Record<string, IndexResult>
+  landuse:   Record<string, number>
+  source:    DataSource
+  note?:     string
+  fetchedAt?: string   // ISO timestamp added client-side
 }
 
 // ── Spectral index definitions ────────────────────────────────────────────────
@@ -197,14 +201,75 @@ function formatCoord(v: number, axis: "lat" | "lng"): string {
   return `${abs}° ${dir}`
 }
 
+// ── DataSourceBanner ──────────────────────────────────────────────────────────
+
+function DataSourceBanner({ source, note, fetchedAt, dk }: {
+  source?:    DataSource
+  note?:      string
+  fetchedAt?: string
+  dk:         boolean
+}) {
+  if (!source) return null
+
+  const configs: Record<DataSource, {
+    icon:    React.ReactNode
+    label:   string
+    detail:  string
+    cls:     string
+  }> = {
+    "sentinel-hub": {
+      icon:   <CheckCircle2 className="size-3.5 shrink-0" />,
+      label:  "Dados reais",
+      detail: "Sentinel-2 L2A · 10 m · últimos 90 dias",
+      cls:    dk
+        ? "bg-emerald-900/30 border-emerald-700/50 text-emerald-300"
+        : "bg-emerald-50 border-emerald-300 text-emerald-800",
+    },
+    "mock": {
+      icon:   <AlertCircle className="size-3.5 shrink-0" />,
+      label:  "Dados simulados",
+      detail: note ?? "Configure Sentinel Hub para dados reais de satélite.",
+      cls:    dk
+        ? "bg-amber-900/30 border-amber-700/50 text-amber-300"
+        : "bg-amber-50 border-amber-300 text-amber-800",
+    },
+    "sentinel-hub-error": {
+      icon:   <WifiOff className="size-3.5 shrink-0" />,
+      label:  "Erro ao consultar Sentinel Hub",
+      detail: note ?? "Verifique CLIENT_ID e CLIENT_SECRET. Exibindo valores simulados.",
+      cls:    dk
+        ? "bg-red-900/30 border-red-700/50 text-red-300"
+        : "bg-red-50 border-red-300 text-red-800",
+    },
+  }
+
+  const cfg = configs[source]
+  return (
+    <div className={cn("flex items-start gap-2 rounded-xl border px-3 py-2.5 text-xs", cfg.cls)}>
+      {cfg.icon}
+      <div className="flex-1 min-w-0">
+        <span className="font-semibold">{cfg.label}</span>
+        <span className="mx-1.5 opacity-40">·</span>
+        <span className="opacity-80">{cfg.detail}</span>
+        {fetchedAt && source === "sentinel-hub" && (
+          <span className="block mt-0.5 opacity-60 text-[10px]">
+            Consultado em {new Date(fetchedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" })}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── IndexCard component ───────────────────────────────────────────────────────
 
 function IndexCard({
-  def, result, loading, dk,
+  def, result, loading, isReal, dk,
 }: {
   def:     typeof SPECTRAL_INDICES[number]
   result?: IndexResult
   loading: boolean
+  isReal:  boolean
   dk:      boolean
 }) {
   const T    = th(dk)
@@ -225,6 +290,19 @@ function IndexCard({
           <p className={cn("text-xs font-bold", T.text)}>{def.label}</p>
           <p className={cn("text-[10px] leading-tight truncate", T.muted)}>{def.fullName}</p>
         </div>
+
+        {/* Real vs simulated badge */}
+        {result && !loading && (
+          <span className={cn(
+            "text-[9px] font-bold px-1.5 py-px rounded-full border shrink-0 leading-tight",
+            isReal
+              ? dk ? "bg-emerald-900/40 border-emerald-700 text-emerald-400" : "bg-emerald-50 border-emerald-300 text-emerald-700"
+              : dk ? "bg-amber-900/40  border-amber-700  text-amber-400"  : "bg-amber-50  border-amber-300  text-amber-700",
+          )}>
+            {isReal ? "REAL" : "SIM"}
+          </span>
+        )}
+
         {result && (
           <span
             className="text-sm font-bold tabular-nums shrink-0"
@@ -234,7 +312,9 @@ function IndexCard({
           </span>
         )}
         {loading && (
-          <span className={cn("text-[10px] italic", T.muted)}>Calculando…</span>
+          <span className={cn("text-[10px] italic flex items-center gap-1", T.muted)}>
+            <RefreshCw className="size-3 animate-spin" /> Calculando…
+          </span>
         )}
       </div>
 
@@ -307,10 +387,12 @@ export function LayerAnalysisModal({
       body:    JSON.stringify({ geojson: layer.geojson, indices: SPECTRAL_INDICES.map(i => i.id) }),
     })
       .then(r => r.json())
-      .then((d: AnalysisData) => setData(d))
+      .then((d: AnalysisData) => setData({ ...d, fetchedAt: new Date().toISOString() }))
       .catch(() => setError("Não foi possível carregar a análise. Tente novamente."))
       .finally(() => setLoading(false))
   }, [layer.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isRealData = data?.source === "sentinel-hub"
 
   const featureCount = layer.geojson.features.length
 
@@ -375,7 +457,7 @@ export function LayerAnalysisModal({
 
           {/* ── Section B — Índices Espectrais ────────────────────────────── */}
           <section>
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start justify-between gap-2 mb-3">
               <SectionHeader icon={<FlaskConical className="size-3.5" />} label="Índices Espectrais" T={T} />
               {!hasSentinelHub && (
                 <a
@@ -389,26 +471,32 @@ export function LayerAnalysisModal({
               )}
             </div>
 
-            {!hasSentinelHub && (
-              <div className={cn("mt-2 mb-3 flex items-start gap-2 rounded-xl border p-3 text-xs", dk ? "bg-amber-900/20 border-amber-700/40 text-amber-300" : "bg-amber-50 border-amber-200 text-amber-800")}>
-                <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-                <p>
-                  Variável <code className="font-mono text-[10px] bg-black/10 px-1 rounded">NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID</code> não configurada.
-                  Os valores abaixo são <strong>simulados</strong> para demonstração.
-                </p>
+            {/* ── Data source banner — shown once all data loads ── */}
+            {!loading && !error && (
+              <div className="mb-3">
+                <DataSourceBanner
+                  source={data?.source}
+                  note={data?.note}
+                  fetchedAt={data?.fetchedAt}
+                  dk={dk}
+                />
               </div>
             )}
 
             {error ? (
-              <p className={cn("text-xs mt-3 text-center py-6", dk ? "text-red-400" : "text-red-600")}>{error}</p>
+              <div className={cn("flex items-center gap-2 rounded-xl border p-3 text-xs", dk ? "bg-red-900/20 border-red-700/50 text-red-300" : "bg-red-50 border-red-200 text-red-700")}>
+                <AlertCircle className="size-3.5 shrink-0" />
+                {error}
+              </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {SPECTRAL_INDICES.map(def => (
                   <IndexCard
                     key={def.id}
                     def={def}
                     result={data?.indices[def.id]}
                     loading={loading}
+                    isReal={isRealData}
                     dk={dk}
                   />
                 ))}
@@ -458,12 +546,17 @@ export function LayerAnalysisModal({
                     </tbody>
                   </table>
                 </div>
-                {data.source === "mock" && (
-                  <div className={cn("mt-2 flex items-center gap-2 rounded-xl border p-2.5 text-[10px]", dk ? "bg-blue-900/20 border-blue-700/40 text-blue-400" : "bg-blue-50 border-blue-200 text-blue-700")}>
-                    <AlertCircle className="size-3 shrink-0" />
-                    Integração MapBiomas não configurada — dados simulados. Configure a API MapBiomas para dados reais da Coleção 9.
-                  </div>
-                )}
+                <div className={cn("mt-2 flex items-center gap-2 rounded-xl border p-2.5 text-[10px]",
+                  dk ? "bg-amber-900/20 border-amber-700/40 text-amber-400" : "bg-amber-50 border-amber-200 text-amber-700")}>
+                  <AlertCircle className="size-3 shrink-0" />
+                  <span>
+                    <strong>Dados simulados</strong> — integração MapBiomas não configurada.{" "}
+                    <a href="https://mapbiomas.org/api" target="_blank" rel="noopener noreferrer" className="underline">
+                      Ver documentação
+                    </a>{" "}
+                    para dados reais da Coleção 9.
+                  </span>
+                </div>
               </>
             ) : loading ? (
               <p className={cn("text-xs mt-3 text-center py-6", T.muted)}>Carregando classificação…</p>
@@ -513,10 +606,17 @@ export function LayerAnalysisModal({
 
         {/* Footer */}
         <div className={cn("px-5 py-3 border-t flex items-center justify-between flex-shrink-0 text-[10px]", T.header)}>
-          <span className={T.muted}>
-            {data?.source === "mock"
-              ? "Dados simulados — conecte Sentinel Hub e MapBiomas para análise real"
-              : "Análise em tempo real via Sentinel Hub"}
+          <span className={cn("flex items-center gap-1.5", T.muted)}>
+            {!loading && data?.source === "sentinel-hub" && (
+              <><CheckCircle2 className="size-3 text-emerald-500" /><span className="text-emerald-500 font-medium">Dados reais</span> · Sentinel-2 L2A</>
+            )}
+            {!loading && data?.source === "mock" && (
+              <><AlertCircle className="size-3 text-amber-500" /><span className="text-amber-500 font-medium">Dados simulados</span> · Configure Sentinel Hub e MapBiomas</>
+            )}
+            {!loading && data?.source === "sentinel-hub-error" && (
+              <><WifiOff className="size-3 text-red-500" /><span className="text-red-500 font-medium">Erro Sentinel Hub</span> · Exibindo simulação</>
+            )}
+            {loading && <><RefreshCw className="size-3 animate-spin" /> Carregando análise…</>}
           </span>
           <button
             onClick={onClose}
