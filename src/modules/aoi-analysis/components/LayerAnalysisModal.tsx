@@ -33,7 +33,7 @@ interface IndexResult {
   unit: string
 }
 
-type DataSource = "mock" | "sentinel-hub" | "sentinel-hub-error"
+type DataSource = "mock" | "sentinel-hub" | "sentinel-hub-error" | "gee" | "gee-error"
 
 interface AnalysisData {
   indices:   Record<string, IndexResult>
@@ -216,30 +216,52 @@ function DataSourceBanner({ source, note, fetchedAt, dk }: {
     label:   string
     detail:  string
     cls:     string
+    showTs:  boolean   // whether to display the fetchedAt timestamp
   }> = {
-    "sentinel-hub": {
-      icon:   <CheckCircle2 className="size-3.5 shrink-0" />,
-      label:  "Dados reais",
-      detail: "Sentinel-2 L2A · 10 m · últimos 90 dias",
-      cls:    dk
+    "gee": {
+      icon:    <CheckCircle2 className="size-3.5 shrink-0" />,
+      label:   "Dados reais",
+      detail:  "Sentinel-2 L2A · 10 m · Google Earth Engine · últimos 90 dias",
+      cls:     dk
         ? "bg-emerald-900/30 border-emerald-700/50 text-emerald-300"
         : "bg-emerald-50 border-emerald-300 text-emerald-800",
+      showTs:  true,
+    },
+    "sentinel-hub": {
+      icon:    <CheckCircle2 className="size-3.5 shrink-0" />,
+      label:   "Dados reais",
+      detail:  "Sentinel-2 L2A · 10 m · Sentinel Hub · últimos 90 dias",
+      cls:     dk
+        ? "bg-emerald-900/30 border-emerald-700/50 text-emerald-300"
+        : "bg-emerald-50 border-emerald-300 text-emerald-800",
+      showTs:  true,
     },
     "mock": {
-      icon:   <AlertCircle className="size-3.5 shrink-0" />,
-      label:  "Dados simulados",
-      detail: note ?? "Configure Sentinel Hub para dados reais de satélite.",
-      cls:    dk
+      icon:    <AlertCircle className="size-3.5 shrink-0" />,
+      label:   "Dados simulados",
+      detail:  note ?? "Configure GEE ou Sentinel Hub para dados reais de satélite.",
+      cls:     dk
         ? "bg-amber-900/30 border-amber-700/50 text-amber-300"
         : "bg-amber-50 border-amber-300 text-amber-800",
+      showTs:  false,
     },
-    "sentinel-hub-error": {
-      icon:   <WifiOff className="size-3.5 shrink-0" />,
-      label:  "Erro ao consultar Sentinel Hub",
-      detail: note ?? "Verifique CLIENT_ID e CLIENT_SECRET. Exibindo valores simulados.",
-      cls:    dk
+    "gee-error": {
+      icon:    <WifiOff className="size-3.5 shrink-0" />,
+      label:   "Erro ao consultar GEE",
+      detail:  note ?? "Verifique GEE_SERVICE_ACCOUNT, GEE_PRIVATE_KEY e GEE_PROJECT. Exibindo valores simulados.",
+      cls:     dk
         ? "bg-red-900/30 border-red-700/50 text-red-300"
         : "bg-red-50 border-red-300 text-red-800",
+      showTs:  false,
+    },
+    "sentinel-hub-error": {
+      icon:    <WifiOff className="size-3.5 shrink-0" />,
+      label:   "Erro ao consultar Sentinel Hub",
+      detail:  note ?? "Verifique CLIENT_ID e CLIENT_SECRET. Exibindo valores simulados.",
+      cls:     dk
+        ? "bg-red-900/30 border-red-700/50 text-red-300"
+        : "bg-red-50 border-red-300 text-red-800",
+      showTs:  false,
     },
   }
 
@@ -251,7 +273,7 @@ function DataSourceBanner({ source, note, fetchedAt, dk }: {
         <span className="font-semibold">{cfg.label}</span>
         <span className="mx-1.5 opacity-40">·</span>
         <span className="opacity-80">{cfg.detail}</span>
-        {fetchedAt && source === "sentinel-hub" && (
+        {fetchedAt && cfg.showTs && (
           <span className="block mt-0.5 opacity-60 text-[10px]">
             Consultado em {new Date(fetchedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" })}
           </span>
@@ -373,11 +395,6 @@ export function LayerAnalysisModal({
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
 
-  const hasSentinelHub = !!(
-    typeof process !== "undefined" &&
-    process.env.NEXT_PUBLIC_SENTINEL_HUB_INSTANCE_ID
-  )
-
   useEffect(() => {
     setLoading(true)
     setError(null)
@@ -392,7 +409,9 @@ export function LayerAnalysisModal({
       .finally(() => setLoading(false))
   }, [layer.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isRealData = data?.source === "sentinel-hub"
+  const isRealData       = data?.source === "gee" || data?.source === "sentinel-hub"
+  // Show the "configure" link only when no real-data source is confirmed yet
+  const hasRealDataSource = isRealData
 
   const featureCount = layer.geojson.features.length
 
@@ -459,14 +478,14 @@ export function LayerAnalysisModal({
           <section>
             <div className="flex items-start justify-between gap-2 mb-3">
               <SectionHeader icon={<FlaskConical className="size-3.5" />} label="Índices Espectrais" T={T} />
-              {!hasSentinelHub && (
+              {!hasRealDataSource && !loading && (
                 <a
-                  href="https://documentation.dataspace.copernicus.eu/APIs/SentinelHub.html"
+                  href="https://developers.google.com/earth-engine/guides/service_account"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1 text-[10px] text-sky-500 hover:text-sky-400 transition-colors shrink-0 mt-0.5"
                 >
-                  Configurar Sentinel Hub <ExternalLink className="size-2.5" />
+                  Configurar GEE <ExternalLink className="size-2.5" />
                 </a>
               )}
             </div>
@@ -607,11 +626,17 @@ export function LayerAnalysisModal({
         {/* Footer */}
         <div className={cn("px-5 py-3 border-t flex items-center justify-between flex-shrink-0 text-[10px]", T.header)}>
           <span className={cn("flex items-center gap-1.5", T.muted)}>
+            {!loading && data?.source === "gee" && (
+              <><CheckCircle2 className="size-3 text-emerald-500" /><span className="text-emerald-500 font-medium">Dados reais</span> · Google Earth Engine</>
+            )}
             {!loading && data?.source === "sentinel-hub" && (
-              <><CheckCircle2 className="size-3 text-emerald-500" /><span className="text-emerald-500 font-medium">Dados reais</span> · Sentinel-2 L2A</>
+              <><CheckCircle2 className="size-3 text-emerald-500" /><span className="text-emerald-500 font-medium">Dados reais</span> · Sentinel Hub</>
             )}
             {!loading && data?.source === "mock" && (
-              <><AlertCircle className="size-3 text-amber-500" /><span className="text-amber-500 font-medium">Dados simulados</span> · Configure Sentinel Hub e MapBiomas</>
+              <><AlertCircle className="size-3 text-amber-500" /><span className="text-amber-500 font-medium">Dados simulados</span> · Configure GEE ou Sentinel Hub</>
+            )}
+            {!loading && data?.source === "gee-error" && (
+              <><WifiOff className="size-3 text-red-500" /><span className="text-red-500 font-medium">Erro GEE</span> · Exibindo simulação</>
             )}
             {!loading && data?.source === "sentinel-hub-error" && (
               <><WifiOff className="size-3 text-red-500" /><span className="text-red-500 font-medium">Erro Sentinel Hub</span> · Exibindo simulação</>

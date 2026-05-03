@@ -1,7 +1,9 @@
 import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["mysql2", "bcryptjs"],
+  // Prevent Next.js from bundling these Node.js / CJS-only packages.
+  // @google/earthengine is a large CJS module that must be required at runtime.
+  serverExternalPackages: ["mysql2", "bcryptjs", "@google/earthengine"],
   outputFileTracingIncludes: {
     "/api/**": ["./drizzle/**"],
   },

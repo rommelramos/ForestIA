@@ -1,20 +1,19 @@
 /**
  * POST /api/aoi-analysis/stats
  *
- * Calculates spectral indices and land-use statistics for a GeoJSON polygon.
+ * Calculates spectral indices (NDVI / EVI / SAVI / NDWI / NBR / NDMI) and
+ * land-use statistics for a GeoJSON polygon.
  *
- * When SENTINEL_HUB_CLIENT_ID + SENTINEL_HUB_CLIENT_SECRET are set, the
- * endpoint calls the Sentinel Hub Statistics API v3 (Sentinel-2 L2A, 10 m)
- * to return real NDVI / EVI / SAVI / NDWI / NBR / NDMI values.
- *
- * Otherwise returns realistic mock data for UI demonstration.
+ * Priority chain (first configured source wins):
+ *   1. Google Earth Engine  — GEE_SERVICE_ACCOUNT + GEE_PRIVATE_KEY + GEE_PROJECT
+ *   2. Sentinel Hub         — SENTINEL_HUB_CLIENT_ID + SENTINEL_HUB_CLIENT_SECRET
+ *   3. Mock data            — fallback for UI demonstration
  */
 import { NextResponse } from "next/server"
+import { fetchGEEStatistics, safeNum } from "@/lib/gee"
 
-// ── Evalscript (Sentinel Hub) ──────────────────────────────────────────────────
-// Outputs 6 single-band float32 layers — one per spectral index.
-// SCL (Scene Classification Layer) is used to mask clouds, cloud shadows,
-// snow and saturated pixels before computing statistics.
+// ── Evalscript (Sentinel Hub fallback) ────────────────────────────────────────
+// Used only when GEE is not configured but Sentinel Hub credentials are present.
 const EVALSCRIPT = `//VERSION=3
 function setup() {
   return {
@@ -31,7 +30,7 @@ function setup() {
   };
 }
 function evaluatePixel(s) {
-  // SCL classes: 4=vegetation, 5=bare soil, 6=water, 7=unclassified → valid
+  // SCL classes: 4=vegetation, 5=bare soil, 6=water, 7=unclassified, 11=snow → valid
   const valid = [4,5,6,7,11].includes(s.SCL) ? 1 : 0;
   const eps = 0.0001;
   const ndvi = (s.B08 - s.B04) / (s.B08 + s.B04 + eps);
@@ -70,7 +69,8 @@ const MOCK_LANDUSE: Record<string, number> = {
   "Servidão Ambiental":                    1.2,
 }
 
-// ── Sentinel Hub OAuth2 token ──────────────────────────────────────────────────
+// ── Sentinel Hub helpers ───────────────────────────────────────────────────────
+
 async function getSHToken(): Promise<string> {
   const clientId     = process.env.SENTINEL_HUB_CLIENT_ID!
   const clientSecret = process.env.SENTINEL_HUB_CLIENT_SECRET!
@@ -91,15 +91,13 @@ async function getSHToken(): Promise<string> {
   return json.access_token
 }
 
-// ── Sentinel Hub Statistics API ────────────────────────────────────────────────
 async function fetchSHStatistics(
   token:   string,
   geojson: GeoJSON.FeatureCollection,
 ): Promise<Record<string, { mean: number; min: number; max: number; unit: string }>> {
   const now  = new Date()
-  const past = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) // last 90 days
+  const past = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
 
-  // Use the union geometry if there are multiple features
   const geometry = geojson.features.length === 1
     ? geojson.features[0].geometry
     : { type: "GeometryCollection", geometries: geojson.features.map(f => f.geometry) }
@@ -113,23 +111,17 @@ async function fetchSHStatistics(
       data: [{
         type: "sentinel-2-l2a",
         dataFilter: {
-          timeRange: {
-            from: past.toISOString(),
-            to:   now.toISOString(),
-          },
+          timeRange: { from: past.toISOString(), to: now.toISOString() },
           maxCloudCoverage: 30,
         },
       }],
     },
     aggregation: {
-      timeRange: {
-        from: past.toISOString(),
-        to:   now.toISOString(),
-      },
-      aggregationInterval: { of: "P30D" },  // monthly bins
-      evalscript:          EVALSCRIPT,
-      resx:                10,
-      resy:                10,
+      timeRange: { from: past.toISOString(), to: now.toISOString() },
+      aggregationInterval: { of: "P30D" },
+      evalscript: EVALSCRIPT,
+      resx: 10,
+      resy: 10,
     },
     calculations: {
       ndvi: { statistics: { default: { percentiles: { k: [10, 50, 90] } } } },
@@ -143,24 +135,16 @@ async function fetchSHStatistics(
 
   const res = await fetch("https://services.sentinel-hub.com/api/v1/statistics", {
     method:  "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type":  "application/json",
-    },
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
-
   if (!res.ok) throw new Error(`SH Statistics error ${res.status}: ${await res.text()}`)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = await res.json() as { data: any[] }
-  const indices: Record<string, { mean: number; min: number; max: number; unit: string }> = {}
-
-  // Aggregate statistics across time intervals (take the median interval)
   const intervals = data.data ?? []
   if (intervals.length === 0) throw new Error("SH returned no data intervals")
 
-  // Use the interval with the most valid pixels (highest percentile count)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const best = intervals.reduce((a: any, b: any) => {
     const aCount = a.outputs?.ndvi?.bands?.B0?.stats?.sampleCount ?? 0
@@ -168,18 +152,10 @@ async function fetchSHStatistics(
     return bCount > aCount ? b : a
   })
 
-  // Debug: log the raw stats structure from SH to diagnose unexpected value types
   console.log("[stats] SH interval sample:", JSON.stringify(best?.outputs?.ndvi?.bands?.B0?.stats))
 
-  // Safely convert any SH value to a rounded number.
-  // SH can return strings like "NaN" or objects in edge cases (all pixels masked).
-  // Number() handles strings; isNaN/isFinite guards against NaN/Infinity.
-  function safeNum(v: unknown, fallback = 0): number {
-    const n = Number(v ?? fallback)
-    return isNaN(n) || !isFinite(n) ? fallback : +n.toFixed(3)
-  }
-
-  for (const indexId of ["ndvi","evi","savi","ndwi","nbr","ndmi"]) {
+  const indices: Record<string, { mean: number; min: number; max: number; unit: string }> = {}
+  for (const indexId of ["ndvi", "evi", "savi", "ndwi", "nbr", "ndmi"]) {
     const stats = best?.outputs?.[indexId]?.bands?.B0?.stats
     if (!stats) continue
     indices[indexId] = {
@@ -200,43 +176,65 @@ export async function POST(req: Request) {
       indices?: string[]
     }
 
-    const hasSHCredentials =
-      !!process.env.SENTINEL_HUB_CLIENT_ID &&
-      !!process.env.SENTINEL_HUB_CLIENT_SECRET
+    const hasGEE = !!(
+      process.env.GEE_SERVICE_ACCOUNT &&
+      process.env.GEE_PRIVATE_KEY &&
+      process.env.GEE_PROJECT
+    )
+    const hasSH = !!(
+      process.env.SENTINEL_HUB_CLIENT_ID &&
+      process.env.SENTINEL_HUB_CLIENT_SECRET
+    )
 
-    // ── Real data via Sentinel Hub ──────────────────────────────────────────
-    if (hasSHCredentials && body.geojson) {
+    // ── 1. Google Earth Engine ──────────────────────────────────────────────
+    if (hasGEE && body.geojson) {
       try {
-        const token   = await getSHToken()
-        const indices = await fetchSHStatistics(token, body.geojson)
-
+        const indices = await fetchGEEStatistics(body.geojson)
         return NextResponse.json({
           indices,
           landuse: MOCK_LANDUSE,   // MapBiomas integration: future work
+          source:  "gee",
+          note:    "Dados reais Sentinel-2 L2A · 10 m · Google Earth Engine.",
+        })
+      } catch (geeErr) {
+        console.error("[stats] GEE error, trying Sentinel Hub:", geeErr)
+        // Fall through to Sentinel Hub
+      }
+    }
+
+    // ── 2. Sentinel Hub (secondary) ─────────────────────────────────────────
+    if (hasSH && body.geojson) {
+      try {
+        const token   = await getSHToken()
+        const indices = await fetchSHStatistics(token, body.geojson)
+        return NextResponse.json({
+          indices,
+          landuse: MOCK_LANDUSE,
           source:  "sentinel-hub",
           note:    "Dados reais Sentinel-2 L2A via Sentinel Hub Statistics API.",
         })
       } catch (shErr) {
         console.error("[stats] Sentinel Hub error, falling back to mock:", shErr)
-        // Fall through to mock response
+        // Fall through to mock
       }
     }
 
-    // ── Mock fallback ───────────────────────────────────────────────────────
+    // ── 3. Mock fallback ────────────────────────────────────────────────────
     const requestedIndices = body.indices ?? Object.keys(MOCK_INDICES)
     const indices: Record<string, { mean: number; min: number; max: number; unit: string }> = {}
     for (const id of requestedIndices) {
       if (MOCK_INDICES[id]) indices[id] = MOCK_INDICES[id]
     }
 
-    return NextResponse.json({
-      indices,
-      landuse: MOCK_LANDUSE,
-      source:  hasSHCredentials ? "sentinel-hub-error" : "mock",
-      note:    hasSHCredentials
-        ? "Erro ao consultar Sentinel Hub. Verifique as credenciais e tente novamente."
-        : "Dados simulados. Configure SENTINEL_HUB_CLIENT_ID e SENTINEL_HUB_CLIENT_SECRET para dados reais.",
-    })
+    // Determine which source failed (for UI messaging)
+    const source = hasGEE ? "gee-error" : hasSH ? "sentinel-hub-error" : "mock"
+    const note = hasGEE
+      ? "Erro ao consultar Google Earth Engine. Verifique GEE_SERVICE_ACCOUNT, GEE_PRIVATE_KEY e GEE_PROJECT."
+      : hasSH
+        ? "Erro ao consultar Sentinel Hub. Verifique CLIENT_ID e CLIENT_SECRET."
+        : "Dados simulados. Configure GEE_SERVICE_ACCOUNT + GEE_PRIVATE_KEY + GEE_PROJECT para dados reais."
+
+    return NextResponse.json({ indices, landuse: MOCK_LANDUSE, source, note })
   } catch {
     return NextResponse.json({ error: "Requisição inválida" }, { status: 400 })
   }
