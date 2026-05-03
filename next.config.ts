@@ -1,11 +1,16 @@
 import type { NextConfig } from "next"
 
+// 'unsafe-eval' is only included in development (Next.js HMR and React DevTools
+// need it).  In production builds no first-party code uses eval(), so omitting
+// it hardens the CSP against XSS-based eval exploitation.
+const isDev = process.env.NODE_ENV !== "production"
+
 const securityHeaders = [
   {
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net",
       "img-src 'self' data: blob: cdn.jsdelivr.net *.tile.openstreetmap.org *.arcgisonline.com gibs.earthdata.nasa.gov ows.mapbiomas.org terrabrasilis.dpi.inpe.br",
       "connect-src 'self' cdn.jsdelivr.net *.tile.openstreetmap.org *.arcgisonline.com gibs.earthdata.nasa.gov ows.mapbiomas.org terrabrasilis.dpi.inpe.br",

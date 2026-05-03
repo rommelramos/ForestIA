@@ -6,7 +6,7 @@ import { signOut } from "next-auth/react"
 import { useEffect, useState } from "react"
 import {
   LayoutDashboard, Users, Map,
-  FolderKanban, Plug, Building2,
+  FolderKanban, Building2,
   LogOut, Database, Settings, TreePine,
   ChevronLeft, ChevronRight,
 } from "lucide-react"
@@ -31,7 +31,6 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: "Ferramentas",
     items: [
       { label: "Bases Geoespaciais", href: "/dashboard/geospatial-sources", icon: Map,       roles: ["admin","gerente","funcionario"] },
-      { label: "Integrações",        href: "/dashboard/integrations",        icon: Plug,      roles: ["admin","gerente","funcionario"] },
       { label: "Portal Cliente",     href: "/dashboard/client-portal",       icon: Building2, roles: ["cliente"] },
     ],
   },

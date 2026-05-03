@@ -52,7 +52,6 @@ const MODULES = [
   { label: "Relatórios de Viabilidade",href: "/dashboard/reports",            roles: ["admin","gerente","funcionario","cliente"] },
   { label: "Gestão de Projetos",       href: "/dashboard/projects",           roles: ["admin","gerente","funcionario","cliente"] },
   { label: "Novos Serviços",           href: "/dashboard/opportunities",      roles: ["admin","gerente"] },
-  { label: "Integrações",             href: "/dashboard/integrations",       roles: ["admin","gerente","funcionario"] },
   { label: "Portal Cliente",           href: "/dashboard/client-portal",      roles: ["cliente"] },
 ]
 
