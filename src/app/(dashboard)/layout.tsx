@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
 import { auth } from "../../../auth"
-import { Sidebar } from "@/components/layout/Sidebar"
+import { DashboardShell } from "@/components/layout/DashboardShell"
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth()
@@ -8,11 +8,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (session.user.role === "pending") redirect("/login?error=PendingApproval")
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar userRole={session.user.role} userName={session.user.name} />
-      <main className="flex-1 bg-zinc-50 overflow-auto min-h-0">
-        {children}
-      </main>
-    </div>
+    <DashboardShell userRole={session.user.role} userName={session.user.name}>
+      {children}
+    </DashboardShell>
   )
 }

@@ -21,8 +21,8 @@ export function TabLinkClient({
       className={cn(
         "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
         isActive
-          ? "border-emerald-600 text-emerald-700 bg-emerald-50/50"
-          : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"
+          ? "border-primary text-primary bg-accent/60"
+          : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
       )}
     >
       {children}

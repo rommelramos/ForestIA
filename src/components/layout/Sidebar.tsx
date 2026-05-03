@@ -53,11 +53,13 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 interface SidebarProps {
-  userRole: string
-  userName: string | null | undefined
+  userRole:     string
+  userName:     string | null | undefined
+  /** Called after the user clicks a nav link — used by mobile overlay to close itself. */
+  onNavigate?:  () => void
 }
 
-export function Sidebar({ userRole, userName }: SidebarProps) {
+export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
   const pathname   = usePathname()
   const [collapsed, setCollapsed] = useState(false)
 
@@ -121,6 +123,7 @@ export function Sidebar({ userRole, userName }: SidebarProps) {
                       key={item.href}
                       href={item.href}
                       title={collapsed ? item.label : undefined}
+                      onClick={onNavigate}
                       className={cn(
                         "flex items-center gap-3 rounded-lg text-sm font-medium transition-all duration-150 border",
                         collapsed ? "px-2 py-2 justify-center" : "px-3 py-2",
