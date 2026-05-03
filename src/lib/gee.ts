@@ -71,7 +71,18 @@ export function safeNum(v: unknown, fallback = 0): number {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type IndexStats = { mean: number; min: number; max: number; unit: string }
+export type IndexStats = {
+  mean:      number
+  min:       number           // P10
+  max:       number           // P90
+  unit:      string
+  stdDev?:   number
+  median?:   number           // P50
+  p25?:      number
+  p75?:      number
+  count?:    number           // valid pixel count
+  histogram?: [number, number][]  // [bucket_lower_bound, pixel_count][]
+}
 
 export type LandUseResult = {
   categories: Record<string, number>   // category name → percentage (0–100)
@@ -265,33 +276,48 @@ export async function fetchGEEStatistics(
 
   const combined = ndvi.addBands([evi, savi, ndwi, nbr, ndmi])
 
-  // ── Region reduction ──────────────────────────────────────────────────────
-  // Output keys for band "ndvi": ndvi_mean, ndvi_p10, ndvi_p90
-  const reducer = ee.Reducer.mean().combine(
-    ee.Reducer.percentile([10, 90]),
-    /* outputPrefix */ null,
-    /* sharedInputs */ true,
-  )
+  // ── Region reductions (run in parallel) ───────────────────────────────────
+  //
+  // Reduction A — descriptive stats
+  //   Output keys: {id}_mean, {id}_stdDev, {id}_p10 … {id}_p90, {id}_count
+  const statsReducer = ee.Reducer.mean()
+    .combine(ee.Reducer.stdDev(),              null, true)
+    .combine(ee.Reducer.percentile([10, 25, 50, 75, 90]), null, true)
+    .combine(ee.Reducer.count(),               null, true)
 
-  const statsExpr = combined.reduceRegion({
-    reducer,
-    geometry,
-    scale:      10,
-    maxPixels:  1e9,
-    bestEffort: true,   // auto-increase scale if pixel quota exceeded
-  })
+  // Reduction B — 40-bucket histogram across [-1, 1]
+  //   Output keys: {id} → [[bucket_lower, count], ...]
+  const histReducer = ee.Reducer.fixedHistogram(-1, 1, 40)
 
-  const raw = await evaluate<Record<string, number | null>>(statsExpr)
-  console.log("[gee] reduceRegion raw:", JSON.stringify(raw))
+  const commonOpts = { geometry, scale: 10, maxPixels: 1e9, bestEffort: true }
 
-  // ── Map to { mean, min, max } ─────────────────────────────────────────────
+  const [rawStats, rawHist] = await Promise.all([
+    evaluate<Record<string, number | null>>(combined.reduceRegion({ reducer: statsReducer, ...commonOpts })),
+    evaluate<Record<string, unknown>>(combined.reduceRegion({ reducer: histReducer,  ...commonOpts })),
+  ])
+
+  console.log("[gee] stats sample (ndvi):", JSON.stringify({
+    mean:  rawStats["ndvi_mean"],
+    p10:   rawStats["ndvi_p10"],
+    p90:   rawStats["ndvi_p90"],
+    count: rawStats["ndvi_count"],
+  }))
+
+  // ── Map to IndexStats ─────────────────────────────────────────────────────
   const indices: Record<string, IndexStats> = {}
   for (const id of ["ndvi", "evi", "savi", "ndwi", "nbr", "ndmi"]) {
+    const hist = rawHist[id]
     indices[id] = {
-      mean: safeNum(raw[`${id}_mean`]),
-      min:  safeNum(raw[`${id}_p10`]),
-      max:  safeNum(raw[`${id}_p90`]),
-      unit: "",
+      mean:      safeNum(rawStats[`${id}_mean`]),
+      min:       safeNum(rawStats[`${id}_p10`]),
+      max:       safeNum(rawStats[`${id}_p90`]),
+      unit:      "",
+      stdDev:    safeNum(rawStats[`${id}_stdDev`]),
+      median:    safeNum(rawStats[`${id}_p50`]),
+      p25:       safeNum(rawStats[`${id}_p25`]),
+      p75:       safeNum(rawStats[`${id}_p75`]),
+      count:     Math.round(safeNum(rawStats[`${id}_count`])),
+      histogram: Array.isArray(hist) ? (hist as [number, number][]) : [],
     }
   }
   return indices

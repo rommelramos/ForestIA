@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import {
   X, BarChart2, FlaskConical, Layers2, Droplets,
   Flame, TreePine, Activity, ExternalLink, AlertCircle,
-  CheckCircle2, WifiOff, RefreshCw,
+  CheckCircle2, WifiOff, RefreshCw, ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -27,10 +27,16 @@ interface MapLayer {
 }
 
 interface IndexResult {
-  mean: number
-  min:  number
-  max:  number
-  unit: string
+  mean:      number
+  min:       number           // P10
+  max:       number           // P90
+  unit:      string
+  stdDev?:   number
+  median?:   number           // P50
+  p25?:      number
+  p75?:      number
+  count?:    number           // valid pixel count
+  histogram?: [number, number][]  // [bucket_lower, pixel_count][]
 }
 
 type DataSource = "mock" | "gee" | "gee-error"
@@ -277,6 +283,169 @@ function DataSourceBanner({ source, note, fetchedAt, dk }: {
   )
 }
 
+// ── IndexHistogram ────────────────────────────────────────────────────────────
+
+function IndexHistogram({
+  result, color, dk,
+}: {
+  result: IndexResult
+  color:  string
+  dk:     boolean
+}) {
+  const hist = result.histogram ?? []
+  if (hist.length === 0) return (
+    <p className={cn("text-[10px] text-center py-2 opacity-50", dk ? "text-zinc-400" : "text-zinc-500")}>
+      Histograma indisponível
+    </p>
+  )
+
+  const W = 260, H = 68
+  const PAD = { l: 22, r: 6, t: 6, b: 18 }
+  const cW = W - PAD.l - PAD.r
+  const cH = H - PAD.t - PAD.b
+
+  const counts  = hist.map(([, c]) => c)
+  const maxCnt  = Math.max(...counts, 1)
+  const xMin    = hist[0][0]
+  const xMax    = hist[hist.length - 1][0] + (hist[1]?.[0] ?? 0.05) - hist[0][0]
+  const xRange  = xMax - xMin || 1
+  const barW    = cW / hist.length
+
+  const toX = (v: number) => PAD.l + ((v - xMin) / xRange) * cW
+  const toY = (c: number) => PAD.t + cH - (c / maxCnt) * cH
+
+  const mean   = result.mean
+  const p25    = result.p25  ?? mean
+  const p75    = result.p75  ?? mean
+  const stdDev = result.stdDev ?? 0
+
+  const sigmaL = Math.max(xMin, mean - stdDev)
+  const sigmaR = Math.min(xMax, mean + stdDev)
+
+  const axisLabels = [-1, -0.5, 0, 0.5, 1]
+  const gridColor  = dk ? "#3f3f46" : "#e4e4e7"
+  const textColor  = dk ? "#a1a1aa" : "#71717a"
+
+  return (
+    <div className="space-y-2 pt-1">
+      {/* SVG chart */}
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        style={{ maxHeight: H }}
+        aria-label="Histograma de distribuição"
+      >
+        {/* ±1σ shaded band */}
+        {stdDev > 0 && (
+          <rect
+            x={toX(sigmaL)} y={PAD.t}
+            width={Math.max(0, toX(sigmaR) - toX(sigmaL))}
+            height={cH}
+            fill={color} opacity={0.12}
+          />
+        )}
+
+        {/* IQR box (P25–P75) */}
+        <rect
+          x={toX(p25)} y={PAD.t}
+          width={Math.max(0, toX(p75) - toX(p25))}
+          height={cH}
+          fill={color} opacity={0.18}
+        />
+
+        {/* Grid lines + x-axis labels */}
+        {axisLabels.map(v => (
+          <g key={v}>
+            <line
+              x1={toX(v)} x2={toX(v)} y1={PAD.t} y2={PAD.t + cH}
+              stroke={gridColor} strokeWidth={0.5}
+            />
+            <text
+              x={toX(v)} y={H - 3}
+              fontSize={8} textAnchor="middle"
+              fill={textColor}
+            >{v}</text>
+          </g>
+        ))}
+
+        {/* Histogram bars */}
+        {hist.map(([bMin, cnt], i) => {
+          const bx = PAD.l + i * barW
+          const bh = (cnt / maxCnt) * cH
+          return (
+            <rect
+              key={i} x={bx + 0.3} y={PAD.t + cH - bh}
+              width={Math.max(0.5, barW - 0.6)} height={bh}
+              fill={color} opacity={0.75}
+            >
+              <title>{`${bMin.toFixed(2)}: ${cnt.toLocaleString()} px`}</title>
+            </rect>
+          )
+        })}
+
+        {/* Median line */}
+        {result.median != null && (
+          <line
+            x1={toX(result.median)} x2={toX(result.median)}
+            y1={PAD.t} y2={PAD.t + cH}
+            stroke={color} strokeWidth={1.5} strokeDasharray="3,2" opacity={0.9}
+          />
+        )}
+
+        {/* Mean line */}
+        <line
+          x1={toX(mean)} x2={toX(mean)}
+          y1={PAD.t} y2={PAD.t + cH}
+          stroke={dk ? "#fff" : "#18181b"} strokeWidth={1.5}
+          strokeDasharray="4,2" opacity={0.8}
+        />
+
+        {/* X-axis baseline */}
+        <line
+          x1={PAD.l} x2={PAD.l + cW} y1={PAD.t + cH} y2={PAD.t + cH}
+          stroke={gridColor} strokeWidth={1}
+        />
+      </svg>
+
+      {/* Legend */}
+      <div className="flex items-center gap-3 text-[9px] flex-wrap" style={{ color: textColor }}>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-4 h-px border-t-2 border-dashed" style={{ borderColor: dk ? "#fff" : "#18181b" }} />
+          média {mean.toFixed(3)}
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-4 h-px border-t-2 border-dashed" style={{ borderColor: color }} />
+          mediana {(result.median ?? mean).toFixed(3)}
+        </span>
+        {stdDev > 0 && (
+          <span>σ = {stdDev.toFixed(3)}</span>
+        )}
+      </div>
+
+      {/* Stats grid */}
+      <div className={cn("grid grid-cols-4 gap-1 rounded-lg p-2 text-[9px]", dk ? "bg-zinc-700/50" : "bg-zinc-100")}>
+        {[
+          { label: "P10",   val: result.min },
+          { label: "P25",   val: result.p25  ?? result.min },
+          { label: "P50",   val: result.median ?? result.mean },
+          { label: "P75",   val: result.p75  ?? result.max },
+          { label: "P90",   val: result.max },
+          { label: "Média", val: result.mean },
+          { label: "σ",     val: result.stdDev ?? 0 },
+          { label: "N px",  val: result.count != null ? result.count.toLocaleString("pt-BR") : "—", raw: true },
+        ].map(({ label, val, raw }) => (
+          <div key={label} className="text-center">
+            <div className={cn("font-medium tabular-nums", dk ? "text-zinc-200" : "text-zinc-700")}>
+              {raw ? val : (typeof val === "number" ? val.toFixed(3) : "—")}
+            </div>
+            <div className={cn("opacity-60", dk ? "text-zinc-400" : "text-zinc-500")}>{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── IndexCard component ───────────────────────────────────────────────────────
 
 function IndexCard({
@@ -288,9 +457,11 @@ function IndexCard({
   isReal:  boolean
   dk:      boolean
 }) {
+  const [histOpen, setHistOpen] = useState(false)
   const T    = th(dk)
   const Icon = def.icon
   const pct  = result ? valueToPercent(result.mean, -1, 1) : 50
+  const hasHist = (result?.histogram?.length ?? 0) > 0
 
   return (
     <div className={cn("rounded-xl border p-3 flex flex-col gap-2 relative overflow-hidden", T.card)}>
@@ -351,9 +522,9 @@ function IndexCard({
       {/* Range */}
       {result ? (
         <div className="flex justify-between text-[10px] tabular-nums">
-          <span className={T.muted}>min {result.min >= 0 ? "+" : ""}{result.min.toFixed(2)}</span>
+          <span className={T.muted}>P10 {result.min >= 0 ? "+" : ""}{result.min.toFixed(2)}</span>
           <span className={T.muted}>faixa: {def.range}</span>
-          <span className={T.muted}>max {result.max >= 0 ? "+" : ""}{result.max.toFixed(2)}</span>
+          <span className={T.muted}>P90 {result.max >= 0 ? "+" : ""}{result.max.toFixed(2)}</span>
         </div>
       ) : (
         <p className={cn("text-[10px]", T.muted)}>faixa: {def.range}</p>
@@ -366,6 +537,34 @@ function IndexCard({
 
       {/* Description */}
       <p className={cn("text-[10px] leading-relaxed", T.muted)}>{def.desc}</p>
+
+      {/* Histogram toggle */}
+      {result && !loading && (
+        <button
+          onClick={() => setHistOpen(v => !v)}
+          className={cn(
+            "flex items-center justify-between gap-1 text-[10px] px-2 py-1 rounded-lg border transition-colors w-full",
+            histOpen
+              ? dk ? "border-zinc-600 bg-zinc-700/60 text-zinc-200" : "border-zinc-300 bg-zinc-100 text-zinc-700"
+              : dk ? "border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-400"
+                   : "border-zinc-200 text-zinc-400 hover:border-zinc-300 hover:text-zinc-600",
+          )}
+        >
+          <span className="flex items-center gap-1.5">
+            <BarChart2 className="size-3" />
+            Distribuição / Histograma
+            {!hasHist && <span className="opacity-50">(dados reais necessários)</span>}
+          </span>
+          <ChevronDown className={cn("size-3 transition-transform shrink-0", histOpen && "rotate-180")} />
+        </button>
+      )}
+
+      {/* Histogram panel */}
+      {histOpen && result && (
+        <div className={cn("rounded-lg border p-2", dk ? "bg-zinc-900/60 border-zinc-700" : "bg-white border-zinc-200")}>
+          <IndexHistogram result={result} color={def.color} dk={dk} />
+        </div>
+      )}
     </div>
   )
 }
