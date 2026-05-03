@@ -36,11 +36,13 @@ interface IndexResult {
 type DataSource = "mock" | "gee" | "gee-error"
 
 interface AnalysisData {
-  indices:   Record<string, IndexResult>
-  landuse:   Record<string, number>
-  source:    DataSource
-  note?:     string
-  fetchedAt?: string   // ISO timestamp added client-side
+  indices:       Record<string, IndexResult>
+  landuse:       Record<string, number>
+  source:        DataSource
+  landuseSource: "mapbiomas" | "mock"
+  landuseYear?:  number
+  note?:         string
+  fetchedAt?:    string   // ISO timestamp added client-side
 }
 
 // ── Spectral index definitions ────────────────────────────────────────────────
@@ -136,12 +138,22 @@ const VEGETATION_TYPES = [
 // ── Land-use colors per Forest Code ──────────────────────────────────────────
 
 const LANDUSE_COLORS: Record<string, string> = {
+  // ── MapBiomas real categories ────────────────────────────────────────────
+  "Floresta Nativa":           "#166534",
+  "Vegetação Natural":         "#4ade80",
+  "Pastagem":                  "#a3e635",
+  "Lavoura Temporária":        "#ca8a04",
+  "Lavoura Perene":            "#92400e",
+  "Silvicultura":              "#15803d",
+  "Área Urbana e Mineração":   "#6b7280",
+  "Recursos Hídricos":         "#0284c7",
+  "Outros":                    "#d1d5db",
+  // ── Mock / Código Florestal categories (fallback) ────────────────────────
   "Vegetação Nativa":                        "#166534",
   "Área de Preservação Permanente (APP)":    "#0369a1",
   "Reserva Legal":                           "#15803d",
   "Área Consolidada":                        "#ca8a04",
   "Uso Alternativo do Solo":                 "#92400e",
-  "Recursos Hídricos":                       "#0284c7",
   "Servidão Ambiental":                      "#7c3aed",
 }
 
@@ -505,13 +517,53 @@ export function LayerAnalysisModal({
             )}
           </section>
 
-          {/* ── Section C — Classificação do Uso do Solo ──────────────────── */}
+          {/* ── Section C — Uso e Cobertura do Solo ──────────────────────── */}
           <section>
-            <SectionHeader icon={<TreePine className="size-3.5" />} label="Classificação do Uso do Solo (Código Florestal)" T={T} />
+            {/* Dynamic title: MapBiomas when real, Forest Code label when mock */}
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <SectionHeader
+                icon={<TreePine className="size-3.5" />}
+                label={
+                  data?.landuseSource === "mapbiomas"
+                    ? `Uso e Cobertura do Solo · MapBiomas Coleção 9`
+                    : "Classificação do Uso do Solo (Código Florestal)"
+                }
+                T={T}
+              />
+              {data?.landuseSource === "mapbiomas" && data.landuseYear && (
+                <span className={cn("text-[10px] shrink-0 mt-0.5 tabular-nums", T.muted)}>
+                  {data.landuseYear} · 30 m
+                </span>
+              )}
+            </div>
 
             {data?.landuse ? (
               <>
-                <div className={cn("mt-3 rounded-xl border overflow-hidden", T.table)}>
+                {/* Data source banner */}
+                {data.landuseSource === "mapbiomas" ? (
+                  <div className={cn("mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs",
+                    dk ? "bg-emerald-900/30 border-emerald-700/50 text-emerald-300"
+                       : "bg-emerald-50 border-emerald-300 text-emerald-800")}>
+                    <CheckCircle2 className="size-3.5 shrink-0" />
+                    <span>
+                      <span className="font-semibold">Dados reais</span>
+                      {" · "}MapBiomas Coleção 9 · {data.landuseYear} · resolução 30 m
+                    </span>
+                  </div>
+                ) : (
+                  <div className={cn("mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs",
+                    dk ? "bg-amber-900/20 border-amber-700/40 text-amber-300"
+                       : "bg-amber-50 border-amber-200 text-amber-700")}>
+                    <AlertCircle className="size-3 shrink-0" />
+                    <span>
+                      <strong>Dados simulados</strong>
+                      {" — "}configure GEE para ativar MapBiomas Coleção 9.
+                    </span>
+                  </div>
+                )}
+
+                {/* Table */}
+                <div className={cn("rounded-xl border overflow-hidden", T.table)}>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className={T.tableTh}>
@@ -547,36 +599,26 @@ export function LayerAnalysisModal({
                     </tbody>
                   </table>
                 </div>
-                <div className={cn("mt-2 flex items-center gap-2 rounded-xl border p-2.5 text-[10px]",
-                  dk ? "bg-amber-900/20 border-amber-700/40 text-amber-400" : "bg-amber-50 border-amber-200 text-amber-700")}>
-                  <AlertCircle className="size-3 shrink-0" />
-                  <span>
-                    <strong>Dados simulados</strong> — integração MapBiomas não configurada.{" "}
-                    <a href="https://mapbiomas.org/api" target="_blank" rel="noopener noreferrer" className="underline">
-                      Ver documentação
-                    </a>{" "}
-                    para dados reais da Coleção 9.
-                  </span>
-                </div>
+
+                {/* Permanent note: APP / RL require spatial analysis */}
+                {data.landuseSource === "mapbiomas" && (
+                  <div className={cn("mt-2 flex items-start gap-2 rounded-xl border p-2.5 text-[10px]",
+                    dk ? "bg-zinc-800/60 border-zinc-700 text-zinc-400"
+                       : "bg-zinc-50 border-zinc-200 text-zinc-500")}>
+                    <AlertCircle className="size-3 shrink-0 mt-px" />
+                    <span>
+                      <strong>APP e Reserva Legal</strong> não são determináveis a partir de LULC isolado —
+                      requerem análise espacial com hidrografia (buffers de cursos d&apos;água e nascentes)
+                      e o polígono do imóvel via{" "}
+                      <a href="https://www.car.gov.br" target="_blank" rel="noopener noreferrer"
+                        className="underline hover:opacity-80">CAR</a>.
+                    </span>
+                  </div>
+                )}
               </>
             ) : loading ? (
               <p className={cn("text-xs mt-3 text-center py-6", T.muted)}>Carregando classificação…</p>
-            ) : (
-              <div className={cn("mt-3 flex items-start gap-2 rounded-xl border p-3 text-xs", dk ? "bg-zinc-800 border-zinc-700 text-zinc-400" : "bg-zinc-50 border-zinc-200 text-zinc-600")}>
-                <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
-                <p>
-                  Integração MapBiomas não configurada.{" "}
-                  <a
-                    href="https://mapbiomas.org/api"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline hover:opacity-80"
-                  >
-                    Ver documentação da API
-                  </a>
-                </p>
-              </div>
-            )}
+            ) : null}
           </section>
 
           {/* ── Section D — Tipologia de Vegetação ────────────────────────── */}
@@ -642,7 +684,7 @@ function SectionHeader({
   icon, label, T,
 }: {
   icon:  React.ReactNode
-  label: string
+  label: string | React.ReactNode
   T:     ReturnType<typeof th>
 }) {
   return (

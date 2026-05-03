@@ -73,6 +73,73 @@ export function safeNum(v: unknown, fallback = 0): number {
 
 export type IndexStats = { mean: number; min: number; max: number; unit: string }
 
+export type LandUseResult = {
+  categories: Record<string, number>   // category name → percentage (0–100)
+  year:       number                   // MapBiomas reference year
+  source:     "mapbiomas"
+}
+
+// ── MapBiomas Collection 9 — class code → category name ──────────────────────
+// Reference: https://mapbiomas.org/codigos-de-legenda
+// Groups are intentionally coarser than the full legend to match the
+// Forest Code categories shown in the UI.
+const MB_CLASS_TO_CATEGORY: Record<number, string> = {
+  // ── Floresta Nativa ────────────────────────────────────────────────────────
+  3:  "Floresta Nativa",   // Formação Florestal
+  4:  "Floresta Nativa",   // Formação Savânica
+  5:  "Floresta Nativa",   // Mangue
+  6:  "Floresta Nativa",   // Floresta Alagável
+  49: "Floresta Nativa",   // Restinga Arborizada
+
+  // ── Vegetação Natural não Florestal ───────────────────────────────────────
+  10: "Vegetação Natural",   // Outras Formações Não Florestais
+  11: "Vegetação Natural",   // Campo Alagado e Área Pantanosa
+  12: "Vegetação Natural",   // Formação Campestre
+  32: "Vegetação Natural",   // Apicum
+  29: "Vegetação Natural",   // Afloramento Rochoso
+  50: "Vegetação Natural",   // Restinga Herbácea
+  13: "Vegetação Natural",   // Outras Formações Não Florestais
+
+  // ── Agropecuária ──────────────────────────────────────────────────────────
+  14: "Pastagem",   // Agropecuária (genérico)
+  15: "Pastagem",   // Pastagem
+  21: "Pastagem",   // Mosaico de Usos
+
+  // Lavoura Temporária
+  18: "Lavoura Temporária",
+  19: "Lavoura Temporária",   // Lavoura Temporária
+  39: "Lavoura Temporária",   // Soja
+  20: "Lavoura Temporária",   // Cana-de-açúcar
+  40: "Lavoura Temporária",   // Arroz
+  62: "Lavoura Temporária",   // Algodão
+  41: "Lavoura Temporária",   // Outras Lavouras Temporárias
+
+  // Lavoura Perene
+  36: "Lavoura Perene",
+  46: "Lavoura Perene",   // Café
+  47: "Lavoura Perene",   // Citrus
+  35: "Lavoura Perene",   // Dendê (Palma de Óleo)
+  48: "Lavoura Perene",   // Outras Lavouras Perenes
+
+  // Silvicultura
+  9:  "Silvicultura",   // Reflorestamento / Plantio
+
+  // ── Área não Vegetada ──────────────────────────────────────────────────────
+  22: "Área Urbana e Mineração",
+  24: "Área Urbana e Mineração",   // Área Urbanizada
+  30: "Área Urbana e Mineração",   // Mineração
+  23: "Área Urbana e Mineração",   // Praia e Duna
+  25: "Área Urbana e Mineração",   // Outras Áreas não Vegetadas
+
+  // ── Recursos Hídricos ─────────────────────────────────────────────────────
+  26: "Recursos Hídricos",
+  33: "Recursos Hídricos",   // Rio, Lago e Oceano
+  31: "Recursos Hídricos",   // Aquicultura
+
+  // ── Não Observado ─────────────────────────────────────────────────────────
+  27: "Não Observado",
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /** Wrap ee.ComputedObject.evaluate() in a Promise. */
@@ -228,4 +295,73 @@ export async function fetchGEEStatistics(
     }
   }
   return indices
+}
+
+// ── MapBiomas land-use computation ────────────────────────────────────────────
+
+/**
+ * Returns the land-use / land-cover breakdown for a GeoJSON polygon using the
+ * MapBiomas Collection 9 public asset (30 m, year 2023).
+ *
+ * The asset is publicly accessible to any authenticated GEE service account —
+ * no extra MapBiomas credentials are needed.
+ *
+ * Categories are grouped to align with the Brazilian Forest Code framework:
+ *   Floresta Nativa, Vegetação Natural, Pastagem, Lavoura Temporária,
+ *   Lavoura Perene, Silvicultura, Área Urbana e Mineração, Recursos Hídricos.
+ *
+ * NOTE: APP (Área de Preservação Permanente) and Reserva Legal boundaries
+ * cannot be derived from LULC data alone — they require spatial analysis
+ * with hydrography (river/spring buffers) and the CAR property polygon.
+ */
+export async function fetchMapBiomasLandUse(
+  geojson: GeoJSON.FeatureCollection,
+): Promise<LandUseResult> {
+  await initGEE()
+
+  const geometry = buildGeometry(geojson)
+
+  const YEAR  = 2023
+  const ASSET = "projects/mapbiomas-public/assets/brazil/lulc/collection9/mapbiomas_collection90_integration_v1"
+  const BAND  = `classification_${YEAR}`
+
+  const img = ee.Image(ASSET).select(BAND)
+
+  // frequencyHistogram returns { "class_code": pixel_count, ... }
+  const histExpr = img.reduceRegion({
+    reducer:    ee.Reducer.frequencyHistogram(),
+    geometry,
+    scale:      30,     // MapBiomas native resolution
+    maxPixels:  1e9,
+    bestEffort: true,
+  })
+
+  const raw = await evaluate<Record<string, Record<string, number>>>(histExpr)
+  const pixelCounts: Record<string, number> = raw[BAND] ?? {}
+
+  console.log("[gee] MapBiomas pixel counts:", JSON.stringify(pixelCounts))
+
+  const total = Object.values(pixelCounts).reduce((s, n) => s + n, 0)
+  if (total === 0) {
+    throw new Error("MapBiomas: nenhum pixel encontrado no polígono — verifique se está dentro do Brasil.")
+  }
+
+  // Aggregate pixel counts into display categories
+  const catCounts: Record<string, number> = {}
+  for (const [codeStr, count] of Object.entries(pixelCounts)) {
+    const cat = MB_CLASS_TO_CATEGORY[Number(codeStr)] ?? "Outros"
+    catCounts[cat] = (catCounts[cat] ?? 0) + count
+  }
+
+  // Convert to percentage, sort descending, skip negligible + "Não Observado"
+  const categories: Record<string, number> = {}
+  const sorted = Object.entries(catCounts).sort(([, a], [, b]) => b - a)
+  for (const [cat, count] of sorted) {
+    const pct = +((count / total) * 100).toFixed(1)
+    if (pct >= 0.1 && cat !== "Não Observado") {
+      categories[cat] = pct
+    }
+  }
+
+  return { categories, year: YEAR, source: "mapbiomas" }
 }
