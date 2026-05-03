@@ -292,39 +292,81 @@ function IndexHistogram({
   color:  string
   dk:     boolean
 }) {
-  const hist = result.histogram ?? []
-  if (hist.length === 0) return (
-    <p className={cn("text-[10px] text-center py-2 opacity-50", dk ? "text-zinc-400" : "text-zinc-500")}>
-      Histograma indisponível
-    </p>
-  )
+  const hist     = result.histogram ?? []
+  const hasHist  = hist.length > 0
 
+  const mean   = result.mean
+  const p25    = result.p25    ?? mean
+  const p75    = result.p75    ?? mean
+  const stdDev = result.stdDev ?? 0
+  const textColor = dk ? "#a1a1aa" : "#71717a"
+  const gridColor = dk ? "#3f3f46" : "#e4e4e7"
+
+  // ── Stats grid (always shown) ─────────────────────────────────────────────
+  const hasExtended = result.stdDev != null || result.median != null
+  const statsRows = [
+    { label: "P10",   val: result.min },
+    { label: "P25",   val: result.p25    ?? result.min },
+    { label: "P50",   val: result.median ?? result.mean },
+    { label: "P75",   val: result.p75    ?? result.max },
+    { label: "P90",   val: result.max },
+    { label: "Média", val: result.mean },
+    { label: "σ",     val: result.stdDev ?? 0 },
+    { label: "N px",  val: result.count != null ? result.count.toLocaleString("pt-BR") : "—", raw: true },
+  ]
+
+  // ── No real histogram — show placeholder + basic stats ───────────────────
+  if (!hasHist) {
+    return (
+      <div className="space-y-2 pt-1">
+        {/* Placeholder chart area */}
+        <div className={cn(
+          "flex flex-col items-center justify-center rounded-lg border gap-1 py-3",
+          dk ? "border-zinc-700 bg-zinc-800/40" : "border-zinc-200 bg-zinc-50",
+        )}>
+          <BarChart2 className={cn("size-5 opacity-20", dk ? "text-zinc-400" : "text-zinc-500")} />
+          <p className={cn("text-[10px] text-center", dk ? "text-zinc-500" : "text-zinc-400")}>
+            Histograma disponível com dados reais (GEE)
+          </p>
+        </div>
+
+        {/* Basic stats — P10 / mean / P90 always available from mock too */}
+        <div className={cn("grid gap-1 rounded-lg p-2 text-[9px]", hasExtended ? "grid-cols-4" : "grid-cols-3", dk ? "bg-zinc-700/50" : "bg-zinc-100")}>
+          {statsRows
+            .filter(r => hasExtended || ["P10","Média","P90"].includes(r.label))
+            .map(({ label, val, raw }) => (
+              <div key={label} className="text-center">
+                <div className={cn("font-medium tabular-nums", dk ? "text-zinc-200" : "text-zinc-700")}>
+                  {raw ? val : (typeof val === "number" ? val.toFixed(3) : "—")}
+                </div>
+                <div className={cn("opacity-60", dk ? "text-zinc-400" : "text-zinc-500")}>{label}</div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+    )
+  }
+
+  // ── Full histogram ────────────────────────────────────────────────────────
   const W = 260, H = 68
   const PAD = { l: 22, r: 6, t: 6, b: 18 }
   const cW = W - PAD.l - PAD.r
   const cH = H - PAD.t - PAD.b
 
-  const counts  = hist.map(([, c]) => c)
-  const maxCnt  = Math.max(...counts, 1)
-  const xMin    = hist[0][0]
-  const xMax    = hist[hist.length - 1][0] + (hist[1]?.[0] ?? 0.05) - hist[0][0]
-  const xRange  = xMax - xMin || 1
-  const barW    = cW / hist.length
+  const counts = hist.map(([, c]) => c)
+  const maxCnt = Math.max(...counts, 1)
+  const xMin   = hist[0][0]
+  const xMax   = hist[hist.length - 1][0] + (hist[1]?.[0] ?? 0.05) - hist[0][0]
+  const xRange = xMax - xMin || 1
+  const barW   = cW / hist.length
 
   const toX = (v: number) => PAD.l + ((v - xMin) / xRange) * cW
-  const toY = (c: number) => PAD.t + cH - (c / maxCnt) * cH
-
-  const mean   = result.mean
-  const p25    = result.p25  ?? mean
-  const p75    = result.p75  ?? mean
-  const stdDev = result.stdDev ?? 0
 
   const sigmaL = Math.max(xMin, mean - stdDev)
   const sigmaR = Math.min(xMax, mean + stdDev)
 
   const axisLabels = [-1, -0.5, 0, 0.5, 1]
-  const gridColor  = dk ? "#3f3f46" : "#e4e4e7"
-  const textColor  = dk ? "#a1a1aa" : "#71717a"
 
   return (
     <div className="space-y-2 pt-1">
@@ -417,23 +459,12 @@ function IndexHistogram({
           <span className="inline-block w-4 h-px border-t-2 border-dashed" style={{ borderColor: color }} />
           mediana {(result.median ?? mean).toFixed(3)}
         </span>
-        {stdDev > 0 && (
-          <span>σ = {stdDev.toFixed(3)}</span>
-        )}
+        {stdDev > 0 && <span>σ = {stdDev.toFixed(3)}</span>}
       </div>
 
-      {/* Stats grid */}
+      {/* Full stats grid */}
       <div className={cn("grid grid-cols-4 gap-1 rounded-lg p-2 text-[9px]", dk ? "bg-zinc-700/50" : "bg-zinc-100")}>
-        {[
-          { label: "P10",   val: result.min },
-          { label: "P25",   val: result.p25  ?? result.min },
-          { label: "P50",   val: result.median ?? result.mean },
-          { label: "P75",   val: result.p75  ?? result.max },
-          { label: "P90",   val: result.max },
-          { label: "Média", val: result.mean },
-          { label: "σ",     val: result.stdDev ?? 0 },
-          { label: "N px",  val: result.count != null ? result.count.toLocaleString("pt-BR") : "—", raw: true },
-        ].map(({ label, val, raw }) => (
+        {statsRows.map(({ label, val, raw }) => (
           <div key={label} className="text-center">
             <div className={cn("font-medium tabular-nums", dk ? "text-zinc-200" : "text-zinc-700")}>
               {raw ? val : (typeof val === "number" ? val.toFixed(3) : "—")}
@@ -538,31 +569,40 @@ function IndexCard({
       {/* Description */}
       <p className={cn("text-[10px] leading-relaxed", T.muted)}>{def.desc}</p>
 
-      {/* Histogram toggle */}
-      {result && !loading && (
-        <button
-          onClick={() => setHistOpen(v => !v)}
-          className={cn(
-            "flex items-center justify-between gap-1 text-[10px] px-2 py-1 rounded-lg border transition-colors w-full",
-            histOpen
+      {/* Histogram toggle — always shown; disabled only while loading */}
+      <button
+        onClick={() => !loading && setHistOpen(v => !v)}
+        disabled={loading}
+        className={cn(
+          "flex items-center justify-between gap-1 text-[10px] px-2 py-1.5 rounded-lg border transition-colors w-full",
+          loading
+            ? "opacity-40 cursor-not-allowed border-transparent"
+            : histOpen
               ? dk ? "border-zinc-600 bg-zinc-700/60 text-zinc-200" : "border-zinc-300 bg-zinc-100 text-zinc-700"
-              : dk ? "border-zinc-700 text-zinc-500 hover:border-zinc-600 hover:text-zinc-400"
-                   : "border-zinc-200 text-zinc-400 hover:border-zinc-300 hover:text-zinc-600",
+              : dk ? "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
+                   : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700",
+        )}
+      >
+        <span className="flex items-center gap-1.5 font-medium">
+          <BarChart2 className="size-3 shrink-0" />
+          Ver Histograma
+          {!loading && !hasHist && (
+            <span className={cn("font-normal", dk ? "text-amber-400/70" : "text-amber-500/80")}>· simulado</span>
           )}
-        >
-          <span className="flex items-center gap-1.5">
-            <BarChart2 className="size-3" />
-            Distribuição / Histograma
-            {!hasHist && <span className="opacity-50">(dados reais necessários)</span>}
-          </span>
-          <ChevronDown className={cn("size-3 transition-transform shrink-0", histOpen && "rotate-180")} />
-        </button>
-      )}
+          {!loading && hasHist && (
+            <span className={cn("font-normal", dk ? "text-emerald-400/70" : "text-emerald-600/80")}>· real</span>
+          )}
+        </span>
+        <ChevronDown className={cn("size-3 transition-transform shrink-0", histOpen && "rotate-180")} />
+      </button>
 
       {/* Histogram panel */}
-      {histOpen && result && (
+      {histOpen && (
         <div className={cn("rounded-lg border p-2", dk ? "bg-zinc-900/60 border-zinc-700" : "bg-white border-zinc-200")}>
-          <IndexHistogram result={result} color={def.color} dk={dk} />
+          {result
+            ? <IndexHistogram result={result} color={def.color} dk={dk} />
+            : <p className={cn("text-[10px] text-center py-3 opacity-50", dk ? "text-zinc-400" : "text-zinc-500")}>Aguardando dados…</p>
+          }
         </div>
       )}
     </div>

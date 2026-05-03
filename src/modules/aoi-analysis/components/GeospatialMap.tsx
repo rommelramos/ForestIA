@@ -129,17 +129,17 @@ const SPECTRAL_OVERLAYS: OverlayDef[] = [
     attribution: "NASA GIBS / MODIS", timeMode: "modis", source: "nasa-gibs",
   },
   {
-    id: "landuse", label: "Uso do Solo", sublabel: "MapBiomas Col. 9",
+    id: "landuse", label: "Uso do Solo", sublabel: "MapBiomas Col. 9 · 2023",
     color: "#78350f", format: "image/png",
-    wmsUrl:      "https://ows.mapbiomas.org/geoserver/mapbiomas/wms",
-    layers:      "mapbiomas-brazil-collection9",
+    wmsUrl:      "https://ows.mapbiomas.org/geoserver/ows",
+    layers:      "mapbiomas:brasil_coverage_col9",
     attribution: "MapBiomas", timeMode: "none", source: "mapbiomas",
   },
   {
     id: "prodes", label: "Desmatamento", sublabel: "INPE PRODES Amazônia",
     color: "#dc2626", format: "image/png",
-    wmsUrl:      "https://terrabrasilis.dpi.inpe.br/geoserver/prodes-amazon/wms",
-    layers:      "yearly_deforestation",
+    wmsUrl:      "https://terrabrasilis.dpi.inpe.br/geoserver/ows",
+    layers:      "prodes-amazon:yearly_deforestation",
     attribution: "INPE", timeMode: "none", source: "inpe",
   },
 ]
@@ -351,6 +351,8 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const [activeOverlays,  setActiveOverlays]  = useState<Set<OverlayId>>(new Set())
   const [overlayOpacity,  setOverlayOpacity]  = useState(0.7)
   const [overlaysOpen,    setOverlaysOpen]    = useState(false)
+  const [overlayStatus,   setOverlayStatus]   = useState<Record<string, "loading" | "ok" | "error">>({})
+
   const [analysisModal,      setAnalysisModal]      = useState<{ open: boolean; layer?: MapLayer }>({ open: false })
   const [visualFiltersOpen,  setVisualFiltersOpen]  = useState(false)
   const [activeVisualFilter, setActiveVisualFilter] = useState<VisualFilterType>("none")
@@ -503,13 +505,21 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               format:      overlay.format,
               transparent: true,
               opacity:     overlayOpacity,
-              version:     "1.1.1",
+              version:     "1.3.0",
               attribution: overlay.attribution,
             }
             // MODIS composites need a specific 8-day period date
             if (overlay.timeMode === "modis") opts.time = modisDate
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
+
+            // Track tile-load status for this overlay
+            const oid = overlay.id
+            setOverlayStatus(s => ({ ...s, [oid]: "loading" }))
+            wmsLayer.on("loading",   () => setOverlayStatus(s => ({ ...s, [oid]: "loading" })))
+            wmsLayer.on("load",      () => setOverlayStatus(s => s[oid] === "error" ? s : { ...s, [oid]: "ok" }))
+            wmsLayer.on("tileerror", () => setOverlayStatus(s => ({ ...s, [oid]: "error" })))
+
             wmsLayer.addTo(map)
             overlayLayerMapRef.current.set(overlay.id, wmsLayer)
           }
@@ -517,6 +527,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
           if (existing) {
             map.removeLayer(existing)
             overlayLayerMapRef.current.delete(overlay.id)
+            setOverlayStatus(s => { const n = { ...s }; delete n[overlay.id]; return n })
           }
         }
       })
@@ -1107,7 +1118,21 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               {overlaysOpen && (
                 <div className="mt-2 space-y-1.5">
                   {SPECTRAL_OVERLAYS.map(ov => {
-                    const isOn = activeOverlays.has(ov.id)
+                    const isOn   = activeOverlays.has(ov.id)
+                    const status = isOn ? overlayStatus[ov.id] : undefined
+
+                    const statusIcon = isOn
+                      ? status === "loading"
+                        ? <Loader2 className="size-3 shrink-0 animate-spin text-amber-400" />
+                        : status === "ok"
+                          ? <Check className="size-3 shrink-0 text-emerald-500" />
+                          : status === "error"
+                            ? <span title="Servidor WMS indisponível ou sem dados para esta região">
+                                <AlertCircle className="size-3 shrink-0 text-red-400" />
+                              </span>
+                            : <Loader2 className="size-3 shrink-0 animate-spin text-amber-400" />
+                      : null
+
                     return (
                       <button
                         key={ov.id}
@@ -1122,7 +1147,9 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         className={cn(
                           "flex w-full items-center gap-2 text-xs px-3 py-2 rounded-lg border transition-colors",
                           isOn
-                            ? "border-emerald-600 bg-emerald-600/10 text-emerald-600"
+                            ? status === "error"
+                              ? dk ? "border-red-700/60 bg-red-900/20 text-red-300" : "border-red-200 bg-red-50 text-red-600"
+                              : "border-emerald-600 bg-emerald-600/10 text-emerald-600"
                             : T.btn,
                         )}
                       >
@@ -1132,11 +1159,18 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                         />
                         <span className="flex-1 text-left min-w-0">
                           <span className="font-medium">{ov.label}</span>
-                          <span className={cn("block text-[10px] truncate mt-px", isOn ? "text-emerald-500" : T.muted)}>
-                            {ov.sublabel}
+                          <span className={cn("block text-[10px] truncate mt-px",
+                            isOn
+                              ? status === "error"
+                                ? dk ? "text-red-400" : "text-red-500"
+                                : "text-emerald-500"
+                              : T.muted)}>
+                            {isOn && status === "error"
+                              ? "Sem dados · servidor indisponível"
+                              : ov.sublabel}
                           </span>
                         </span>
-                        {isOn && <Check className="size-3 shrink-0 text-emerald-500" />}
+                        {statusIcon}
                       </button>
                     )
                   })}
