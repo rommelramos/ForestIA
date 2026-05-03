@@ -6,7 +6,7 @@ const envSchema = z.object({
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string(),
   DB_NAME: z.string().min(1),
-  NEXTAUTH_SECRET: z.string().min(1).optional(),
+  NEXTAUTH_SECRET: z.string().min(32),
   NEXTAUTH_URL: z.string().url().optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 })

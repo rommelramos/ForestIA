@@ -12,6 +12,7 @@
  */
 import { NextResponse } from "next/server"
 import { fetchGEEStatistics, fetchMapBiomasLandUse } from "@/lib/gee"
+import { auth } from "../../../../../auth"
 
 // ── Mock fallback data ─────────────────────────────────────────────────────────
 const MOCK_INDICES: Record<string, { mean: number; min: number; max: number; unit: string }> = {
@@ -34,6 +35,13 @@ const MOCK_LANDUSE: Record<string, number> = {
 
 // ── Route handler ──────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
+  // Require an authenticated session — prevents anyone on the internet from
+  // triggering GEE API calls (which are billed to the project quota).
+  const session = await auth()
+  if (!session) {
+    return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+  }
+
   try {
     const body = await req.json() as {
       geojson?: GeoJSON.FeatureCollection

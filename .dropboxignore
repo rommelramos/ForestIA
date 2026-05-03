@@ -1,0 +1,16 @@
+# Variáveis de ambiente com segredos (chaves privadas, tokens, senhas)
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+
+# Cache de build do Next.js (grande e regenerável)
+.next/
+
+# Módulos Node (regeneráveis via npm install)
+node_modules/
+
+# Cache de ferramentas de desenvolvimento
+.turbo/
+.cache/

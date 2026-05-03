@@ -31,6 +31,19 @@ export const memberSchema = z.object({
   role: z.enum(MEMBER_ROLES).default("analyst"),
 })
 
-export type ProjectInput = z.infer<typeof projectSchema>
-export type StageInput = z.infer<typeof stageSchema>
-export type MemberInput = z.infer<typeof memberSchema>
+// Strict allowlist for PATCH — only these fields may be updated.
+// Prevents spreading arbitrary body fields into db.update() (mass-assignment).
+export const stagePatchSchema = z.object({
+  stageId:     z.number().int().positive(),
+  name:        z.string().min(2).optional(),
+  description: z.string().optional(),
+  order:       z.number().int().min(1).optional(),
+  assignedTo:  z.string().optional(),
+  dueDate:     z.string().optional(),
+  status:      z.enum(STAGE_STATUSES).optional(),
+})
+
+export type ProjectInput  = z.infer<typeof projectSchema>
+export type StageInput    = z.infer<typeof stageSchema>
+export type StagePatch    = z.infer<typeof stagePatchSchema>
+export type MemberInput   = z.infer<typeof memberSchema>

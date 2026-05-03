@@ -43,9 +43,16 @@ export async function POST(request: Request): Promise<NextResponse> {
       request,
       onBeforeGenerateToken: async (_pathname) => {
         return {
-          // Accept GeoJSON or plain text; allow up to 200 MB per file
-          allowedContentTypes: ["application/json", "text/plain", "application/octet-stream"],
-          maximumSizeInBytes:  200 * 1024 * 1024,
+          // Accept GeoJSON, plain text, and ZIP (Shapefile bundles only).
+          // Removed application/octet-stream — it's a catch-all that allows any file type.
+          allowedContentTypes: [
+            "application/json",
+            "text/plain",
+            "application/zip",
+            "application/x-zip-compressed",
+          ],
+          // 50 MB is sufficient for high-resolution shapefiles; 200 MB was excessive.
+          maximumSizeInBytes: 50 * 1024 * 1024,
         }
       },
       onUploadCompleted: async ({ blob }) => {

@@ -47,6 +47,16 @@ export const GET = withErrorHandling(async () => {
     return NextResponse.json({ error: "Não autorizado" }, { status: 403 })
   }
   const db = getDb()
-  const list = await db.select().from(inviteTokens).orderBy(inviteTokens.createdAt)
+  // Omit the raw token — it is a single-use credential and must not be
+  // enumerable after creation. The inviteUrl is only returned at POST time.
+  const list = await db.select({
+    id:        inviteTokens.id,
+    email:     inviteTokens.email,
+    role:      inviteTokens.role,
+    expiresAt: inviteTokens.expiresAt,
+    usedAt:    inviteTokens.usedAt,
+    createdBy: inviteTokens.createdBy,
+    createdAt: inviteTokens.createdAt,
+  }).from(inviteTokens).orderBy(inviteTokens.createdAt)
   return NextResponse.json(list)
 })

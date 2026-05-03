@@ -92,7 +92,15 @@ export async function runMigrations(credentials: DbCredentials): Promise<void> {
   await pool.end()
 }
 
+/** Validates that a database/table name is safe to interpolate into a SQL identifier. */
+function assertSafeIdentifier(name: string, label = "identifier"): void {
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+    throw new Error(`Unsafe SQL ${label}: "${name}" — only letters, numbers and underscores are allowed`)
+  }
+}
+
 export async function createDatabase(credentials: DbCredentials): Promise<void> {
+  assertSafeIdentifier(credentials.database, "database name")
   let conn: mysql.Connection | undefined
   try {
     conn = await mysql.createConnection({
@@ -109,6 +117,7 @@ export async function createDatabase(credentials: DbCredentials): Promise<void> 
 }
 
 export async function dropAndRecreateDatabase(credentials: DbCredentials): Promise<void> {
+  assertSafeIdentifier(credentials.database, "database name")
   // Shared-hosting MySQL users typically lack DROP/CREATE DATABASE privileges.
   // Instead we connect directly to the target database, discover every table
   // via information_schema (including __drizzle_migrations), disable FK checks,
@@ -133,7 +142,9 @@ export async function dropAndRecreateDatabase(credentials: DbCredentials): Promi
     if (rows.length > 0) {
       await conn.execute("SET FOREIGN_KEY_CHECKS = 0")
       for (const row of rows) {
-        await conn.execute(`DROP TABLE IF EXISTS \`${row.TABLE_NAME as string}\``)
+        const tableName = row.TABLE_NAME as string
+        assertSafeIdentifier(tableName, "table name")   // defense-in-depth
+        await conn.execute(`DROP TABLE IF EXISTS \`${tableName}\``)
       }
       await conn.execute("SET FOREIGN_KEY_CHECKS = 1")
     }

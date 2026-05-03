@@ -5,7 +5,9 @@ export const dbCredentialsSchema = z.object({
   port: z.number().int().min(1).max(65535),
   user: z.string().min(1, "Usuário obrigatório"),
   password: z.string(),
-  database: z.string().min(1, "Nome do banco obrigatório"),
+  // Only allow safe identifier characters — prevents SQL injection via interpolation
+  database: z.string().min(1, "Nome do banco obrigatório")
+    .regex(/^[a-zA-Z0-9_]+$/, "Nome do banco deve conter apenas letras, números e sublinhados"),
 })
 
 export type DbCredentialsInput = z.infer<typeof dbCredentialsSchema>
@@ -19,7 +21,7 @@ export const testConnectionResponseSchema = z.object({
 export type TestConnectionResponse = z.infer<typeof testConnectionResponseSchema>
 
 export const dbActionSchema = z.object({
-  action: z.enum(["create", "regenerate"]),
+  action: z.enum(["create", "regenerate", "migrate"]),
   credentials: dbCredentialsSchema,
 })
 

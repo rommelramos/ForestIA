@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm"
 import { auth } from "../../../../../../auth"
 import { getDb } from "@/lib/db/drizzle"
 import { projectStages } from "@/lib/db/schema"
-import { stageSchema } from "@/modules/projects/schemas"
+import { stageSchema, stagePatchSchema, STAGE_STATUSES } from "@/modules/projects/schemas"
 import { withErrorHandling } from "@/lib/api/errors"
 
 export const GET = withErrorHandling(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
@@ -45,14 +45,20 @@ export const PATCH = withErrorHandling(async (req: NextRequest, { params }: { pa
 
   await params
   const body = await req.json()
-  const { stageId, ...updates } = body
+
+  // Validate against strict allowlist — prevents mass-assignment of arbitrary columns
+  const parsed = stagePatchSchema.safeParse(body)
+  if (!parsed.success) return NextResponse.json({ error: "Dados inválidos" }, { status: 400 })
+
+  const { stageId, dueDate, status, ...rest } = parsed.data
 
   const db = getDb()
   await db.update(projectStages).set({
-    ...updates,
-    dueDate: updates.dueDate ? new Date(updates.dueDate) : undefined,
-    completedAt: updates.status === "completed" ? new Date() : undefined,
-  }).where(eq(projectStages.id, Number(stageId)))
+    ...rest,
+    ...(dueDate !== undefined ? { dueDate: new Date(dueDate) } : {}),
+    ...(status  !== undefined ? { status } : {}),
+    ...(status === "completed" ? { completedAt: new Date() } : {}),
+  }).where(eq(projectStages.id, stageId))
 
   return NextResponse.json({ success: true })
 })

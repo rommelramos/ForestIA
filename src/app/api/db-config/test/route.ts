@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { testConnection, checkDatabaseExists } from "@/lib/db"
 import { dbCredentialsSchema } from "@/modules/db-config/schemas"
+import { isDbConfigured } from "@/lib/env"
+import { auth } from "../../../../../auth"
 
 export async function POST(req: NextRequest) {
+  // Once the app is set up, only admins may probe DB connections (prevents SSRF).
+  if (isDbConfigured()) {
+    const session = await auth()
+    if (!session || session.user.role !== "admin") {
+      return NextResponse.json({ success: false, error: "Não autorizado" }, { status: 403 })
+    }
+  }
+
   try {
     const body = await req.json()
     const parsed = dbCredentialsSchema.safeParse(body)
