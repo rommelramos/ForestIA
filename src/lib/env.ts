@@ -16,6 +16,13 @@ type Env = z.infer<typeof envSchema>
 function validateEnv(): Partial<Env> {
   const parsed = envSchema.safeParse(process.env)
   if (!parsed.success) {
+    const missing = parsed.error.issues.map(i => i.path.join(".")).join(", ")
+    if (process.env.NODE_ENV === "production") {
+      // Hard-fail at startup so a misconfigured deployment never serves traffic.
+      throw new Error(`[env] Variáveis de ambiente inválidas ou ausentes: ${missing}`)
+    }
+    // In dev/test, log and continue so the setup wizard still works without a DB.
+    console.warn(`[env] Variáveis de ambiente ausentes (ignorado em dev): ${missing}`)
     return {}
   }
   return parsed.data

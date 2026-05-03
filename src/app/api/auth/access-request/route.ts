@@ -20,16 +20,17 @@ export async function POST(req: NextRequest) {
       .where(eq(accessRequests.email, parsed.data.email))
       .limit(1)
 
-    if (existing.length > 0) {
-      return NextResponse.json({ error: "Já existe uma solicitação para este e-mail." }, { status: 409 })
+    // If a request already exists for this email we silently succeed instead of
+    // returning 409.  A 409 would let an attacker enumerate which e-mail
+    // addresses have already requested access (email oracle).
+    if (existing.length === 0) {
+      await db.insert(accessRequests).values({
+        name: parsed.data.name,
+        email: parsed.data.email,
+        requestedRole: parsed.data.requestedRole,
+        justification: parsed.data.justification,
+      })
     }
-
-    await db.insert(accessRequests).values({
-      name: parsed.data.name,
-      email: parsed.data.email,
-      requestedRole: parsed.data.requestedRole,
-      justification: parsed.data.justification,
-    })
 
     return NextResponse.json({ success: true })
   } catch (err) {
