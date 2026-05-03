@@ -7,7 +7,7 @@
  *
  * Required environment variables:
  *   GEE_SERVICE_ACCOUNT   e.g. forestia@my-project.iam.gserviceaccount.com
- *   GEE_PRIVATE_KEY       -----BEGIN RSA PRIVATE KEY----- (newlines as literal \n)
+ *   GEE_PRIVATE_KEY       -----BEGIN PRIVATE KEY----- (newlines as literal \n)
  *   GEE_PROJECT           Google Cloud project ID registered with Earth Engine
  *
  * The @google/earthengine package is CommonJS-only. It must be listed in
@@ -49,7 +49,7 @@ export function initGEE(): Promise<void> {
         )
       },
       (err: unknown) => {
-        _initPromise = null          // allow retry on config fix
+        _initPromise = null       // allow retry after credential fix
         reject(new Error(`GEE authentication failed: ${err}`))
       },
     )
@@ -61,7 +61,7 @@ export function initGEE(): Promise<void> {
 // ── Numeric safety helper ─────────────────────────────────────────────────────
 
 /**
- * Converts any value from an API response to a rounded finite number.
+ * Converts any value from a GEE evaluate() result to a rounded finite number.
  * Handles strings (including "NaN"), null, undefined, and non-numeric objects.
  */
 export function safeNum(v: unknown, fallback = 0): number {
@@ -73,15 +73,93 @@ export function safeNum(v: unknown, fallback = 0): number {
 
 export type IndexStats = { mean: number; min: number; max: number; unit: string }
 
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+/** Wrap ee.ComputedObject.evaluate() in a Promise. */
+function evaluate<T>(obj: any): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    obj.evaluate((result: any, err: any) => {
+      if (err) reject(new Error(String(err)))
+      else resolve(result as T)
+    })
+  })
+}
+
+/**
+ * Build an EE Geometry from a GeoJSON FeatureCollection.
+ * Avoids passing the full FeatureCollection object to ee.FeatureCollection()
+ * which can misparse non-standard properties attached to features.
+ */
+function buildGeometry(geojson: GeoJSON.FeatureCollection): any {
+  if (geojson.features.length === 1) {
+    // Single feature — construct geometry directly from the GeoJSON geometry
+    return ee.Geometry(geojson.features[0].geometry)
+  }
+  // Multiple features — build individual EE Features then union
+  const eeFeatures = geojson.features.map((f) => ee.Feature(ee.Geometry(f.geometry)))
+  return ee.FeatureCollection(eeFeatures).geometry()
+}
+
+/**
+ * Returns a Sentinel-2 SR Harmonized collection filtered to the geometry,
+ * with SCL cloud mask applied and reflectances scaled to [0, 1].
+ * Tries progressively relaxed cloud-cover thresholds until at least one
+ * image is found, then returns both the collection size and the median image.
+ */
+async function getS2Median(
+  geometry: any,
+  dateFrom: string,
+  dateTo:   string,
+): Promise<{ size: number; image: any }> {
+  // Only the bands we actually need — avoids "no band named X" from extras
+  const BANDS = ["B2", "B3", "B4", "B8", "B11", "B12", "SCL"]
+
+  // Try cloud-cover thresholds in order: start strict, relax progressively.
+  // In the Amazon, persistent cloud cover > 30 % is normal.
+  const CC_THRESHOLDS = [30, 60, 80]
+
+  for (const maxCC of CC_THRESHOLDS) {
+    const col = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+      .filterDate(dateFrom, dateTo)
+      .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", maxCC))
+      .filterBounds(geometry)
+      .select(BANDS)
+
+    const size = await evaluate<number>(col.size())
+
+    if (size > 0) {
+      console.log(`[gee] S2 collection: ${size} images (maxCC=${maxCC}%, ${dateFrom}→${dateTo})`)
+      const image = col
+        .map((img: any) => {
+          const scl  = img.select("SCL")
+          // SCL valid classes: 4=veg, 5=bare soil, 6=water, 7=unclassified, 11=snow
+          const mask = scl.eq(4).or(scl.eq(5)).or(scl.eq(6)).or(scl.eq(7)).or(scl.eq(11))
+          // Select only spectral bands (drop SCL) before masking + scaling
+          return img.select(["B2", "B3", "B4", "B8", "B11", "B12"])
+            .updateMask(mask)
+            .divide(10000)   // DN → reflectance [0, 1]
+        })
+        .median()
+      return { size, image }
+    }
+  }
+
+  throw new Error(
+    `GEE: nenhuma imagem Sentinel-2 encontrada para o polígono informado no ` +
+    `período ${dateFrom} → ${dateTo} (mesmo com cobertura de nuvens ≤ 80 %).`,
+  )
+}
+
 // ── Core computation ──────────────────────────────────────────────────────────
 
 /**
  * Computes spectral indices for a GeoJSON polygon via GEE.
  *
- * Data source: Sentinel-2 SR Harmonized (COPERNICUS/S2_SR_HARMONIZED), 10 m.
- * Cloud masking: SCL classes 4 / 5 / 6 / 7 / 11 kept as valid pixels.
- * Time window: last 90 days, cloud cover ≤ 30 %.
- * Statistics: mean + P10 (min) + P90 (max) via reduceRegion.
+ * Data source : Sentinel-2 SR Harmonized (COPERNICUS/S2_SR_HARMONIZED), 10 m.
+ * Cloud masking: SCL classes 4 / 5 / 6 / 7 / 11 (valid pixels).
+ * Time window  : last 180 days; cloud-cover threshold relaxed progressively
+ *                (30 % → 60 % → 80 %) until at least one image is found.
+ * Statistics   : mean + P10 (min) + P90 (max) via reduceRegion.
  */
 export async function fetchGEEStatistics(
   geojson: GeoJSON.FeatureCollection,
@@ -89,27 +167,15 @@ export async function fetchGEEStatistics(
   await initGEE()
 
   const now  = new Date()
-  const past = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+  // 180-day window ensures coverage even in persistently cloudy regions (Amazon)
+  const past = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000)
   const fmt  = (d: Date) => d.toISOString().split("T")[0]   // "YYYY-MM-DD"
 
   // ── Geometry ──────────────────────────────────────────────────────────────
-  // ee.FeatureCollection accepts a GeoJSON object directly; .geometry() unions
-  // all features so multi-polygon AOIs are handled transparently.
-  const fc       = ee.FeatureCollection(geojson)
-  const geometry = fc.geometry()
+  const geometry = buildGeometry(geojson)
 
-  // ── Sentinel-2 SR Harmonized with SCL cloud mask ──────────────────────────
-  const s2 = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") as any)
-    .filterDate(fmt(past), fmt(now))
-    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
-    .filterBounds(geometry)
-    .map((img: any) => {
-      const scl  = img.select("SCL")
-      // Keep: 4 = vegetation, 5 = bare soil, 6 = water, 7 = unclassified, 11 = snow/ice
-      const mask = scl.eq(4).or(scl.eq(5)).or(scl.eq(6)).or(scl.eq(7)).or(scl.eq(11))
-      return img.updateMask(mask).divide(10000)   // DN → reflectance [0, 1]
-    })
-    .median()
+  // ── Sentinel-2 median (with progressive cloud relaxation) ─────────────────
+  const { image: s2 } = await getS2Median(geometry, fmt(past), fmt(now))
 
   // ── Spectral indices ──────────────────────────────────────────────────────
   const ndvi = s2.normalizedDifference(["B8", "B4"]).rename("ndvi")
@@ -120,7 +186,7 @@ export async function fetchGEEStatistics(
     { NIR: s2.select("B8"), RED: s2.select("B4"), BLUE: s2.select("B2") },
   ).rename("evi")
 
-  // SAVI: ((NIR − RED) / (NIR + RED + 0.5)) × 1.5
+  // SAVI: 1.5 × (NIR − RED) / (NIR + RED + 0.5)
   const savi = s2.expression(
     "1.5 * (NIR - RED) / (NIR + RED + 0.5)",
     { NIR: s2.select("B8"), RED: s2.select("B4") },
@@ -133,9 +199,8 @@ export async function fetchGEEStatistics(
   const combined = ndvi.addBands([evi, savi, ndwi, nbr, ndmi])
 
   // ── Region reduction ──────────────────────────────────────────────────────
-  // Combined reducer: mean() + percentile([10,90]) with shared inputs.
   // Output keys for band "ndvi": ndvi_mean, ndvi_p10, ndvi_p90
-  const reducer = (ee.Reducer.mean() as any).combine(
+  const reducer = ee.Reducer.mean().combine(
     ee.Reducer.percentile([10, 90]),
     /* outputPrefix */ null,
     /* sharedInputs */ true,
@@ -146,19 +211,10 @@ export async function fetchGEEStatistics(
     geometry,
     scale:      10,
     maxPixels:  1e9,
-    bestEffort: true,   // automatically increase scale if quota exceeded
+    bestEffort: true,   // auto-increase scale if pixel quota exceeded
   })
 
-  // evaluate() serialises the expression and sends it to GEE servers.
-  const raw = await new Promise<Record<string, number | null>>(
-    (resolve, reject) => {
-      statsExpr.evaluate((result: any, err: any) => {
-        if (err) reject(new Error(`GEE evaluate error: ${err}`))
-        else resolve(result as Record<string, number | null>)
-      })
-    },
-  )
-
+  const raw = await evaluate<Record<string, number | null>>(statsExpr)
   console.log("[gee] reduceRegion raw:", JSON.stringify(raw))
 
   // ── Map to { mean, min, max } ─────────────────────────────────────────────
