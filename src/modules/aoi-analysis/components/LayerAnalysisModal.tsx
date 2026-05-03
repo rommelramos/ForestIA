@@ -561,39 +561,33 @@ function IndexCard({
         <p className={cn("text-[10px]", T.muted)}>faixa: {def.range}</p>
       )}
 
-      {/* Formula */}
-      <p className={cn("text-[10px] font-mono opacity-60 truncate", T.text)} title={def.formula}>
-        {def.formula}
-      </p>
-
-      {/* Description */}
-      <p className={cn("text-[10px] leading-relaxed", T.muted)}>{def.desc}</p>
-
-      {/* Histogram toggle — always shown; disabled only while loading */}
+      {/* ── Histogram toggle — prominent, right after the value bar ── */}
       <button
         onClick={() => !loading && setHistOpen(v => !v)}
         disabled={loading}
         className={cn(
-          "flex items-center justify-between gap-1 text-[10px] px-2 py-1.5 rounded-lg border transition-colors w-full",
-          loading
-            ? "opacity-40 cursor-not-allowed border-transparent"
-            : histOpen
-              ? dk ? "border-zinc-600 bg-zinc-700/60 text-zinc-200" : "border-zinc-300 bg-zinc-100 text-zinc-700"
-              : dk ? "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-zinc-300"
-                   : "border-zinc-200 text-zinc-500 hover:border-zinc-300 hover:text-zinc-700",
+          "flex items-center justify-between gap-1.5 text-[11px] font-semibold px-3 py-2 rounded-lg border-2 transition-all w-full",
+          loading ? "opacity-40 cursor-not-allowed" : "",
         )}
+        style={{
+          borderColor:     def.color + "66",
+          backgroundColor: histOpen ? def.color : def.color + "18",
+          color:           histOpen ? "#fff" : def.color,
+        }}
       >
-        <span className="flex items-center gap-1.5 font-medium">
-          <BarChart2 className="size-3 shrink-0" />
+        <span className="flex items-center gap-1.5">
+          <BarChart2 className="size-3.5 shrink-0" />
           Ver Histograma
-          {!loading && !hasHist && (
-            <span className={cn("font-normal", dk ? "text-amber-400/70" : "text-amber-500/80")}>· simulado</span>
-          )}
-          {!loading && hasHist && (
-            <span className={cn("font-normal", dk ? "text-emerald-400/70" : "text-emerald-600/80")}>· real</span>
+          {!loading && (
+            <span className={cn(
+              "text-[9px] font-normal px-1.5 py-px rounded-full",
+              histOpen ? "bg-white/20" : "bg-black/10",
+            )}>
+              {hasHist ? "dados reais" : "simulado"}
+            </span>
           )}
         </span>
-        <ChevronDown className={cn("size-3 transition-transform shrink-0", histOpen && "rotate-180")} />
+        <ChevronDown className={cn("size-3.5 transition-transform shrink-0", histOpen && "rotate-180")} />
       </button>
 
       {/* Histogram panel */}
@@ -605,6 +599,12 @@ function IndexCard({
           }
         </div>
       )}
+
+      {/* Formula + description (below the histogram toggle) */}
+      <p className={cn("text-[10px] font-mono opacity-60 truncate", T.text)} title={def.formula}>
+        {def.formula}
+      </p>
+      <p className={cn("text-[10px] leading-relaxed", T.muted)}>{def.desc}</p>
     </div>
   )
 }
