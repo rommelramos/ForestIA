@@ -6,7 +6,7 @@ import {
   Sun, Moon, ChevronLeft, ChevronRight, Eye, EyeOff, Layers,
   Zap, X, Save, MapPin, Edit2, Loader2, Check, CloudOff,
   AlertCircle, RotateCcw, CloudCheck, BarChart2, ChevronDown,
-  FlaskConical,
+  FlaskConical, SlidersHorizontal,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LayerAnalysisModal } from "./LayerAnalysisModal"
@@ -66,6 +66,7 @@ const RESTRICTION_COLORS = ["#dc2626","#ea580c","#db2777","#b45309","#9333ea"]
 // Pixel-level statistics (NDVI/EVI/etc.) are computed server-side via GEE.
 
 type OverlayId = "ndvi" | "evi" | "lst" | "moisture" | "landuse" | "prodes"
+type VisualFilterType = "none" | "contrast" | "sharpen" | "blur" | "hsv" | "pansharp"
 
 interface OverlayDef {
   id:          OverlayId
@@ -331,6 +332,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const drawCtrlObj       = useRef<{ ctrl: unknown }>({ ctrl: null })
   const layersRef         = useRef<MapLayer[]>([])
   const overlayLayerMapRef = useRef<Map<string, import("leaflet").TileLayer>>(new Map())
+  const sharpenConvRef     = useRef<SVGFEConvolveMatrixElement | null>(null)
 
   const [layers,       setLayers]      = useState<MapLayer[]>([])
   const [mapReady,     setMapReady]    = useState(false)
@@ -349,7 +351,14 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const [activeOverlays,  setActiveOverlays]  = useState<Set<OverlayId>>(new Set())
   const [overlayOpacity,  setOverlayOpacity]  = useState(0.7)
   const [overlaysOpen,    setOverlaysOpen]    = useState(false)
-  const [analysisModal,   setAnalysisModal]   = useState<{ open: boolean; layer?: MapLayer }>({ open: false })
+  const [analysisModal,      setAnalysisModal]      = useState<{ open: boolean; layer?: MapLayer }>({ open: false })
+  const [visualFiltersOpen,  setVisualFiltersOpen]  = useState(false)
+  const [activeVisualFilter, setActiveVisualFilter] = useState<VisualFilterType>("none")
+  const [filterIntensity,    setFilterIntensity]    = useState(50)   // 0–100
+  const [filterHue,          setFilterHue]          = useState(0)    // 0–360
+  const [filterSaturation,   setFilterSaturation]   = useState(130)  // 0–200
+  const [filterBrightness,   setFilterBrightness]   = useState(100)  // 50–150
+  const [filterContrast,     setFilterContrast]     = useState(130)  // 50–200
 
   const dk = theme === "dark"
   const T  = th(dk)
@@ -514,6 +523,70 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOverlays, overlayOpacity])
+
+  // ── Inject SVG sharpen-filter defs into map container (once on mount) ───────
+  useEffect(() => {
+    if (!mapReady || !containerRef.current) return
+    if (containerRef.current.querySelector("#fm-svg-defs")) return
+    const NS     = "http://www.w3.org/2000/svg"
+    const svg    = document.createElementNS(NS, "svg")
+    svg.id       = "fm-svg-defs"
+    svg.setAttribute("style", "position:absolute;width:0;height:0;overflow:hidden;pointer-events:none")
+    svg.setAttribute("aria-hidden", "true")
+    const defs   = document.createElementNS(NS, "defs")
+    const filter = document.createElementNS(NS, "filter")
+    filter.id    = "fm-sharpen"
+    filter.setAttribute("color-interpolation-filters", "sRGB")
+    const conv   = document.createElementNS(NS, "feConvolveMatrix")
+    conv.setAttribute("order", "3")
+    conv.setAttribute("kernelMatrix", "0 0 0 0 1 0 0 0 0")   // identity default
+    conv.setAttribute("divisor", "1")
+    conv.setAttribute("preserveAlpha", "true")
+    filter.appendChild(conv)
+    defs.appendChild(filter)
+    svg.appendChild(defs)
+    containerRef.current.appendChild(svg)
+    sharpenConvRef.current = conv
+  }, [mapReady])
+
+  // ── Apply visual filter to Leaflet tile pane (GPU-accelerated CSS/SVG) ──────
+  useEffect(() => {
+    if (!mapReady || !containerRef.current) return
+    const pane = containerRef.current.querySelector<HTMLElement>(".leaflet-tile-pane")
+    if (!pane) return
+
+    const t = filterIntensity / 100   // normalised 0–1
+
+    // Update SVG sharpening kernel: blend identity → unsharp-mask by t
+    if (sharpenConvRef.current) {
+      const c = 1 + 8 * t   // center weight
+      const e = -t           // edge/corner weights
+      sharpenConvRef.current.setAttribute("kernelMatrix",
+        `${e} ${e} ${e} ${e} ${c} ${e} ${e} ${e} ${e}`)
+    }
+
+    let f = ""
+    switch (activeVisualFilter) {
+      case "contrast":
+        f = `brightness(${(filterBrightness / 100).toFixed(3)}) contrast(${(filterContrast / 100).toFixed(3)})`
+        break
+      case "sharpen":
+        f = "url(#fm-sharpen)"
+        break
+      case "blur":
+        f = `blur(${(t * 3).toFixed(1)}px) brightness(${(1 + t * 0.05).toFixed(3)})`
+        break
+      case "hsv":
+        f = `hue-rotate(${filterHue}deg) saturate(${(filterSaturation / 100).toFixed(3)})`
+        break
+      case "pansharp":
+        f = `contrast(${(1 + t * 0.4).toFixed(3)}) saturate(${(1 + t * 0.6).toFixed(3)}) brightness(${(1 + t * 0.05).toFixed(3)}) url(#fm-sharpen)`
+        break
+      default:
+        f = ""
+    }
+    pane.style.filter = f
+  }, [mapReady, activeVisualFilter, filterIntensity, filterHue, filterSaturation, filterBrightness, filterContrast])
 
   // ── Sync layers to map ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -1091,6 +1164,87 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
               )}
             </section>
 
+            {/* ── Visual Filters ───────────────────────────────────────── */}
+            <section className={cn("p-3 border-b", T.section)}>
+              <button
+                onClick={() => setVisualFiltersOpen(v => !v)}
+                className="flex w-full items-center justify-between"
+              >
+                <p className={cn("text-[10px] font-semibold uppercase tracking-widest flex items-center gap-1.5", T.label)}>
+                  <SlidersHorizontal className="size-3" /> Filtros Visuais
+                  {activeVisualFilter !== "none" && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-violet-600 text-white text-[9px] font-bold leading-none">
+                      1
+                    </span>
+                  )}
+                </p>
+                <ChevronDown className={cn("size-3 transition-transform", T.muted, visualFiltersOpen && "rotate-180")} />
+              </button>
+
+              {visualFiltersOpen && (
+                <div className="mt-2 space-y-2">
+
+                  {/* Filter type selector — 3 × 2 grid */}
+                  <div className="grid grid-cols-3 gap-1">
+                    {([
+                      { id: "none",     label: "Nenhum"     },
+                      { id: "contrast", label: "Contraste"  },
+                      { id: "sharpen",  label: "Passa-alta" },
+                      { id: "blur",     label: "Passa-baixa"},
+                      { id: "hsv",      label: "HSV"        },
+                      { id: "pansharp", label: "Pansharp"   },
+                    ] as { id: VisualFilterType; label: string }[]).map(f => (
+                      <button
+                        key={f.id}
+                        onClick={() => setActiveVisualFilter(f.id)}
+                        className={cn(
+                          "text-[10px] px-1 py-1.5 rounded-lg border font-medium transition-colors leading-tight text-center",
+                          activeVisualFilter === f.id
+                            ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                            : T.btn,
+                        )}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Per-filter sliders */}
+                  {activeVisualFilter === "contrast" && (
+                    <div className="space-y-2">
+                      <SliderControl label="Brilho"    value={filterBrightness} min={50}  max={150} unit="%" onChange={setFilterBrightness} T={T} accentCls="accent-violet-600" />
+                      <SliderControl label="Contraste" value={filterContrast}   min={50}  max={200} unit="%" onChange={setFilterContrast}   T={T} accentCls="accent-violet-600" />
+                    </div>
+                  )}
+
+                  {(activeVisualFilter === "sharpen" || activeVisualFilter === "blur" || activeVisualFilter === "pansharp") && (
+                    <SliderControl label="Intensidade" value={filterIntensity} min={0} max={100} unit="%" onChange={setFilterIntensity} T={T} accentCls="accent-violet-600" />
+                  )}
+
+                  {activeVisualFilter === "hsv" && (
+                    <div className="space-y-2">
+                      <SliderControl label="Tonalidade" value={filterHue}        min={0}  max={360} unit="°" onChange={setFilterHue}        T={T} accentCls="accent-violet-600" />
+                      <SliderControl label="Saturação"  value={filterSaturation} min={0}  max={200} unit="%" onChange={setFilterSaturation} T={T} accentCls="accent-violet-600" />
+                    </div>
+                  )}
+
+                  {/* Quick-reset */}
+                  {activeVisualFilter !== "none" && (
+                    <button
+                      onClick={() => setActiveVisualFilter("none")}
+                      className={cn("w-full text-[10px] px-2 py-1.5 rounded-lg border transition-colors", T.btn)}
+                    >
+                      Remover filtro
+                    </button>
+                  )}
+
+                  <p className={cn("text-[10px] leading-relaxed", T.muted)}>
+                    Filtros aplicados diretamente à camada base via GPU — sem reprocessamento de tiles.
+                  </p>
+                </div>
+              )}
+            </section>
+
             {/* Samples */}
             <section className={cn("p-3 border-b space-y-1.5", T.section)}>
               <p className={cn("text-[10px] font-semibold uppercase tracking-widest mb-2 flex items-center gap-1.5", T.label)}>
@@ -1358,6 +1512,33 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── SliderControl ─────────────────────────────────────────────────────────────
+
+function SliderControl({ label, value, min, max, unit, onChange, T, accentCls = "accent-emerald-600" }: {
+  label:     string
+  value:     number
+  min:       number
+  max:       number
+  unit:      string
+  onChange:  (v: number) => void
+  T:         ReturnType<typeof th>
+  accentCls?: string
+}) {
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between">
+        <p className={cn("text-[10px]", T.muted)}>{label}</p>
+        <p className={cn("text-[10px] tabular-nums font-medium", T.text)}>{value}{unit}</p>
+      </div>
+      <input
+        type="range" min={min} max={max} step={1} value={value}
+        onChange={e => onChange(parseInt(e.target.value))}
+        className={cn("w-full h-1.5 cursor-pointer", accentCls)}
+      />
     </div>
   )
 }
