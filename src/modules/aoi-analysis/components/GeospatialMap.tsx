@@ -10,12 +10,14 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { LayerAnalysisModal } from "./LayerAnalysisModal"
+import { PROVIDERS, type ProviderKey } from "@/lib/spectral-providers"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type LayerType  = "aoi" | "restriction" | null
-type Theme      = "light" | "dark"
-type SyncStatus = "saving" | "saved" | "error" | "local"
+type LayerType    = "aoi" | "restriction" | null
+type Theme        = "light" | "dark"
+type SyncStatus   = "saving" | "saved" | "error" | "local"
+type TileProvider = ProviderKey
 
 interface MapLayer {
   id:          string
@@ -352,6 +354,10 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const [overlayOpacity,  setOverlayOpacity]  = useState(0.7)
   const [overlaysOpen,    setOverlaysOpen]    = useState(false)
   const [overlayStatus,   setOverlayStatus]   = useState<Record<string, "loading" | "ok" | "error">>({})
+  const [tileProvider,    setTileProvider]    = useState<TileProvider>("modis")
+  const [geeTileCache,    setGeeTileCache]    = useState<Partial<Record<OverlayId, { url: string; expiresAt: number }>>>({})
+  const [providerLoading, setProviderLoading] = useState(false)
+  const [shConfigured,    setShConfigured]    = useState(false)
 
   const [analysisModal,      setAnalysisModal]      = useState<{ open: boolean; layer?: MapLayer }>({ open: false })
   const [visualFiltersOpen,  setVisualFiltersOpen]  = useState(false)
@@ -367,6 +373,51 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
   // Keep ref in sync for callbacks that can't depend on `layers`
   useEffect(() => { layersRef.current = layers }, [layers])
+
+  // ── Check Sentinel Hub configuration (once on mount) ────────────────────────
+  useEffect(() => {
+    fetch("/api/sentinel-hub/config")
+      .then(r => r.json())
+      .then((d: { configured?: boolean }) => setShConfigured(d.configured ?? false))
+      .catch(() => {})
+  }, [])
+
+  // ── Fetch GEE tile URLs when provider or active overlays change ──────────────
+  useEffect(() => {
+    if (tileProvider !== "landsat" && tileProvider !== "sentinel2") return
+
+    const toFetch = Array.from(activeOverlays).filter(id => {
+      // MODIS-only overlays do not use GEE
+      if (id === "landuse" || id === "prodes") return false
+      // LST not supported in Sentinel-2
+      if (id === "lst" && tileProvider === "sentinel2") return false
+      const cached = geeTileCache[id]
+      return !cached || cached.expiresAt < Date.now()
+    })
+
+    if (toFetch.length === 0) return
+    setProviderLoading(true)
+
+    Promise.all(toFetch.map(async (id) => {
+      const geeIndex = id === "moisture" ? "ndwi" : id
+      const res = await fetch(`/api/gee/tiles?index=${geeIndex}&source=${tileProvider}`)
+      if (!res.ok) throw new Error(`GEE tile fetch failed for ${id}`)
+      const data = await res.json() as { tileUrl: string; expiresAt: number }
+      return [id, data] as const
+    }))
+      .then(results => {
+        setGeeTileCache(prev => {
+          const next = { ...prev }
+          for (const [id, data] of results) {
+            next[id as OverlayId] = { url: data.tileUrl, expiresAt: data.expiresAt }
+          }
+          return next
+        })
+      })
+      .catch(console.error)
+      .finally(() => setProviderLoading(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tileProvider, activeOverlays])
 
   // ── Init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -484,56 +535,125 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     })
   }, [activeBase])
 
-  // ── Sync WMS spectral overlays ──────────────────────────────────────────────
+  // ── Sync WMS/GEE spectral overlays ──────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
     import("leaflet").then((L) => {
       const modisDate = getModisDate()
 
+      // When provider changes, remove all existing overlay layers so they are
+      // recreated with the new source below.
+      // We detect a provider change by checking if any existing layer was added
+      // for a different provider — simplest approach: always clear and recreate
+      // when tileProvider is not modis (to avoid stale WMS vs tile-layer mixing).
+      // For MODIS we keep the incremental add/remove logic for efficiency.
+
       SPECTRAL_OVERLAYS.forEach(overlay => {
         const active   = activeOverlays.has(overlay.id)
         const existing = overlayLayerMapRef.current.get(overlay.id)
+        const oid      = overlay.id
+
+        // Always-MODIS overlays (land use, deforestation) — use WMS regardless of provider
+        const alwaysModis = overlay.id === "landuse" || overlay.id === "prodes"
+        // LST not supported in Sentinel-2
+        const lstOnS2 = overlay.id === "lst" && tileProvider === "sentinel2"
 
         if (active) {
-          if (existing) {
-            existing.setOpacity(overlayOpacity)
-          } else {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const opts: Record<string, unknown> = {
-              layers:      overlay.layers,
-              format:      overlay.format,
-              transparent: true,
-              opacity:     overlayOpacity,
-              version:     "1.3.0",
-              attribution: overlay.attribution,
+          // ── MODIS provider or always-modis overlays → WMS ──────────────────
+          if (tileProvider === "modis" || alwaysModis) {
+            if (existing) {
+              existing.setOpacity(overlayOpacity)
+            } else {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const opts: Record<string, unknown> = {
+                layers:      overlay.layers,
+                format:      overlay.format,
+                transparent: true,
+                opacity:     overlayOpacity,
+                version:     "1.3.0",
+                attribution: overlay.attribution,
+              }
+              if (overlay.timeMode === "modis") opts.time = modisDate
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
+              setOverlayStatus(s => ({ ...s, [oid]: "loading" }))
+              wmsLayer.on("loading",   () => setOverlayStatus(s => ({ ...s, [oid]: "loading" })))
+              wmsLayer.on("load",      () => setOverlayStatus(s => s[oid] === "error" ? s : { ...s, [oid]: "ok" }))
+              wmsLayer.on("tileerror", () => setOverlayStatus(s => ({ ...s, [oid]: "error" })))
+              wmsLayer.addTo(map)
+              overlayLayerMapRef.current.set(oid, wmsLayer)
             }
-            // MODIS composites need a specific 8-day period date
-            if (overlay.timeMode === "modis") opts.time = modisDate
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const wmsLayer = (L as any).tileLayer.wms(overlay.wmsUrl, opts) as import("leaflet").TileLayer
-
-            // Track tile-load status for this overlay
-            const oid = overlay.id
-            setOverlayStatus(s => ({ ...s, [oid]: "loading" }))
-            wmsLayer.on("loading",   () => setOverlayStatus(s => ({ ...s, [oid]: "loading" })))
-            wmsLayer.on("load",      () => setOverlayStatus(s => s[oid] === "error" ? s : { ...s, [oid]: "ok" }))
-            wmsLayer.on("tileerror", () => setOverlayStatus(s => ({ ...s, [oid]: "error" })))
-
-            wmsLayer.addTo(map)
-            overlayLayerMapRef.current.set(overlay.id, wmsLayer)
+            return
           }
+
+          // ── Sentinel Hub provider → server-side proxy tile layer ────────────
+          if (tileProvider === "sentinel-hub" && !lstOnS2) {
+            if (existing) {
+              existing.setOpacity(overlayOpacity)
+            } else {
+              const geeIndex = oid === "moisture" ? "ndwi" : oid
+              const tileUrl  = `/api/sentinel-hub/tiles/{z}/{x}/{y}?index=${geeIndex}`
+              const shLayer  = L.tileLayer(tileUrl, {
+                opacity:     overlayOpacity,
+                attribution: "Sentinel Hub · Copernicus",
+                tileSize:    256,
+              })
+              setOverlayStatus(s => ({ ...s, [oid]: "loading" }))
+              shLayer.on("loading",   () => setOverlayStatus(s => ({ ...s, [oid]: "loading" })))
+              shLayer.on("load",      () => setOverlayStatus(s => s[oid] === "error" ? s : { ...s, [oid]: "ok" }))
+              shLayer.on("tileerror", () => setOverlayStatus(s => ({ ...s, [oid]: "error" })))
+              shLayer.addTo(map)
+              overlayLayerMapRef.current.set(oid, shLayer)
+            }
+            return
+          }
+
+          // ── GEE (landsat / sentinel2) → mapId tile layer ────────────────────
+          if ((tileProvider === "landsat" || tileProvider === "sentinel2") && !lstOnS2) {
+            const cached = geeTileCache[oid]
+            if (!cached) {
+              // Tile URL not yet available — the geeTileCache useEffect is loading it
+              return
+            }
+            if (existing) {
+              existing.setOpacity(overlayOpacity)
+            } else {
+              const provMeta   = PROVIDERS.find(p => p.key === tileProvider)
+              const attribution = provMeta ? `${provMeta.label} · ${provMeta.sublabel}` : "GEE"
+              const tileLayer  = L.tileLayer(cached.url, {
+                opacity:     overlayOpacity,
+                attribution,
+                tileSize:    256,
+              })
+              setOverlayStatus(s => ({ ...s, [oid]: "loading" }))
+              tileLayer.on("loading",   () => setOverlayStatus(s => ({ ...s, [oid]: "loading" })))
+              tileLayer.on("load",      () => setOverlayStatus(s => s[oid] === "error" ? s : { ...s, [oid]: "ok" }))
+              tileLayer.on("tileerror", () => setOverlayStatus(s => ({ ...s, [oid]: "error" })))
+              tileLayer.addTo(map)
+              overlayLayerMapRef.current.set(oid, tileLayer)
+            }
+            return
+          }
+
+          // LST on S2 — remove if somehow present, skip
+          if (existing) {
+            map.removeLayer(existing)
+            overlayLayerMapRef.current.delete(oid)
+            setOverlayStatus(s => { const n = { ...s }; delete n[oid]; return n })
+          }
+
         } else {
           if (existing) {
             map.removeLayer(existing)
-            overlayLayerMapRef.current.delete(overlay.id)
-            setOverlayStatus(s => { const n = { ...s }; delete n[overlay.id]; return n })
+            overlayLayerMapRef.current.delete(oid)
+            setOverlayStatus(s => { const n = { ...s }; delete n[oid]; return n })
           }
         }
       })
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOverlays, overlayOpacity])
+  }, [activeOverlays, overlayOpacity, tileProvider, geeTileCache])
 
   // ── Inject SVG sharpen-filter defs into map container (once on mount) ───────
   useEffect(() => {
@@ -1117,9 +1237,68 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
 
               {overlaysOpen && (
                 <div className="mt-2 space-y-1.5">
+
+                  {/* ── Provider selector ─────────────────────────────────── */}
+                  <div className="mb-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-400 mb-1.5 px-1">Resolução / Fonte</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {PROVIDERS.map(p => {
+                        const isActive   = tileProvider === p.key
+                        const isDisabled = (p.requiresSH && !shConfigured) || false
+                        return (
+                          <button
+                            key={p.key}
+                            disabled={isDisabled || providerLoading}
+                            onClick={() => {
+                              // Remove all existing overlay layers so they are
+                              // recreated with the new provider in the sync useEffect
+                              const map = mapRef.current
+                              if (map) {
+                                overlayLayerMapRef.current.forEach((layer) => {
+                                  map.removeLayer(layer)
+                                })
+                                overlayLayerMapRef.current.clear()
+                                setOverlayStatus({})
+                              }
+                              setGeeTileCache({})
+                              setTileProvider(p.key)
+                              // Trigger re-sync by touching activeOverlays
+                              setActiveOverlays(prev => new Set(prev))
+                            }}
+                            title={isDisabled
+                              ? "Configure SENTINEL_HUB_CLIENT_ID e SENTINEL_HUB_CLIENT_SECRET"
+                              : `${p.label} · ${p.resolution}`}
+                            className={cn(
+                              "flex flex-col items-start rounded-lg px-2.5 py-1.5 text-left transition-all border text-[10px]",
+                              isActive
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                : "border-zinc-700/50 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600",
+                              isDisabled && "opacity-40 cursor-not-allowed",
+                            )}
+                          >
+                            <span className="font-semibold leading-none">{p.label}</span>
+                            <span className="text-zinc-500 mt-0.5">{p.resolution} · {p.revisit}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {providerLoading && (
+                      <p className="text-[9px] text-emerald-400 mt-1 px-1 flex items-center gap-1">
+                        <span className="animate-spin inline-block size-2.5 border border-emerald-400 border-t-transparent rounded-full" />
+                        Carregando tiles via GEE…
+                      </p>
+                    )}
+                  </div>
+
                   {SPECTRAL_OVERLAYS.map(ov => {
                     const isOn   = activeOverlays.has(ov.id)
                     const status = isOn ? overlayStatus[ov.id] : undefined
+
+                    // Compute the displayed sublabel based on active provider
+                    const provMeta   = PROVIDERS.find(p => p.key === tileProvider)
+                    const resolucao  = tileProvider === "modis"
+                      ? ov.sublabel
+                      : `${provMeta?.resolution ?? ""} · ${provMeta?.label ?? ""}`
 
                     const statusIcon = isOn
                       ? status === "loading"
@@ -1167,7 +1346,7 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
                               : T.muted)}>
                             {isOn && status === "error"
                               ? "Sem dados · servidor indisponível"
-                              : ov.sublabel}
+                              : resolucao}
                           </span>
                         </span>
                         {statusIcon}
