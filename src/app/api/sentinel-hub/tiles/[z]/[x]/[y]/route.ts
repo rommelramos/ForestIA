@@ -42,7 +42,10 @@ async function getShToken(): Promise<string> {
     client_secret: clientSecret,
   })
 
-  const res = await fetch("https://services.sentinel-hub.com/oauth/token", {
+  // Copernicus Data Space Ecosystem (CDSE) OAuth endpoint.
+  // The legacy services.sentinel-hub.com/oauth/token no longer accepts
+  // CDSE credentials — use the Keycloak realm URL instead.
+  const res = await fetch("https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token", {
     method:  "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body:    body.toString(),
@@ -193,7 +196,8 @@ export const GET = withErrorHandling(async (
     evalscript,
   }
 
-  const shRes = await fetch("https://services.sentinel-hub.com/api/v1/process", {
+  // CDSE Process API — different base URL from legacy sentinel-hub.com.
+  const shRes = await fetch("https://sh.dataspace.copernicus.eu/api/v1/process", {
     method:  "POST",
     headers: {
       "Content-Type":  "application/json",

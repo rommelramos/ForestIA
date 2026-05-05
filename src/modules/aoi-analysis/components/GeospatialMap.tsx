@@ -333,8 +333,11 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
   const interGroupRef     = useRef<import("leaflet").FeatureGroup | null>(null)
   const drawCtrlObj       = useRef<{ ctrl: unknown }>({ ctrl: null })
   const layersRef         = useRef<MapLayer[]>([])
-  const overlayLayerMapRef = useRef<Map<string, import("leaflet").TileLayer>>(new Map())
-  const sharpenConvRef     = useRef<SVGFEConvolveMatrixElement | null>(null)
+  const overlayLayerMapRef   = useRef<Map<string, import("leaflet").TileLayer>>(new Map())
+  const sharpenConvRef       = useRef<SVGFEConvolveMatrixElement | null>(null)
+  /** Tracks the provider that was used when each overlay layer was created.
+   *  On provider change we flush all layers so they are recreated with the new source. */
+  const activeProviderRef    = useRef<TileProvider>("modis")
 
   const [layers,       setLayers]      = useState<MapLayer[]>([])
   const [mapReady,     setMapReady]    = useState(false)
@@ -542,12 +545,17 @@ export function GeospatialMap({ projectId, onSaved }: { projectId?: number; onSa
     import("leaflet").then((L) => {
       const modisDate = getModisDate()
 
-      // When provider changes, remove all existing overlay layers so they are
-      // recreated with the new source below.
-      // We detect a provider change by checking if any existing layer was added
-      // for a different provider — simplest approach: always clear and recreate
-      // when tileProvider is not modis (to avoid stale WMS vs tile-layer mixing).
-      // For MODIS we keep the incremental add/remove logic for efficiency.
+      // ── Flush stale layers on provider change ──────────────────────────────
+      // When the user picks a different tile source the existing layers were
+      // created for the previous provider.  The forEach below only *creates*
+      // layers when `existing` is falsy, so we must remove them first so that
+      // the correct branch (WMS / GEE tileLayer / SH proxy) can recreate them.
+      if (activeProviderRef.current !== tileProvider) {
+        overlayLayerMapRef.current.forEach((layer) => map.removeLayer(layer))
+        overlayLayerMapRef.current.clear()
+        setOverlayStatus({})
+        activeProviderRef.current = tileProvider
+      }
 
       SPECTRAL_OVERLAYS.forEach(overlay => {
         const active   = activeOverlays.has(overlay.id)
