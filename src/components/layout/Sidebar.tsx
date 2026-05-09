@@ -83,19 +83,30 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "flex flex-col h-full flex-shrink-0 bg-zinc-950 border-r border-zinc-800/50 transition-all duration-200",
+        "flex flex-col h-full flex-shrink-0 transition-all duration-200",
         collapsed ? "w-[52px]" : "w-64"
       )}
+      style={{ background: "oklch(0.17 0.05 155)", borderRight: "1px solid oklch(0.25 0.05 155 / 60%)" }}
     >
       {/* ── Logo ─────────────────────────────────────────────── */}
-      <div className={cn("border-b border-zinc-800/50 flex items-center gap-3 flex-shrink-0", collapsed ? "px-2 py-4 justify-center" : "px-5 py-5")}>
-        <div className="size-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-          <TreePine className="size-5 text-emerald-400" />
+      <div
+        className={cn("flex items-center gap-3 flex-shrink-0", collapsed ? "px-2 py-4 justify-center" : "px-5 py-5")}
+        style={{ borderBottom: "1px solid oklch(0.25 0.05 155 / 50%)" }}
+      >
+        <div className="size-9 rounded-xl flex items-center justify-center shrink-0"
+             style={{ background: "oklch(0.45 0.13 155 / 30%)", border: "1px solid oklch(0.55 0.13 155 / 40%)" }}>
+          <TreePine className="size-5" style={{ color: "oklch(0.70 0.14 155)" }} />
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="text-sm font-bold text-white tracking-wide leading-none">ForestIA</p>
-            <p className="text-[10px] text-zinc-500 tracking-widest uppercase mt-0.5">Gestão Florestal</p>
+            <p className="text-sm font-bold tracking-widest leading-none"
+               style={{ fontFamily: "var(--font-display)", color: "oklch(0.92 0.012 80)" }}>
+              ForestIA
+            </p>
+            <p className="text-[10px] tracking-widest uppercase mt-0.5"
+               style={{ color: "oklch(0.48 0.06 155)" }}>
+              Gestão Florestal
+            </p>
           </div>
         )}
       </div>
@@ -108,7 +119,8 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
           return (
             <div key={section.title}>
               {!collapsed && (
-                <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest px-2 mb-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-widest px-2 mb-1.5"
+                   style={{ color: "oklch(0.38 0.06 155)" }}>
                   {section.title}
                 </p>
               )}
@@ -128,60 +140,80 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
                         "flex items-center gap-3 rounded-lg text-sm font-medium transition-all duration-150 border",
                         collapsed ? "px-2 py-2 justify-center" : "px-3 py-2",
                         active
-                          ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                          : "text-zinc-400 border-transparent hover:text-zinc-100 hover:bg-zinc-800/50"
+                          ? "border-[oklch(0.55_0.13_155/30%)]"
+                          : "border-transparent hover:border-[oklch(0.30_0.06_155/40%)] hover:bg-[oklch(0.25_0.06_155/50%)]"
                       )}
+                      style={active ? {
+                        background: "oklch(0.45 0.13 155 / 25%)",
+                        color:      "oklch(0.78 0.12 155)",
+                      } : {
+                        color: "oklch(0.52 0.06 155)",
+                      }}
                     >
-                      <Icon className={cn("size-4 shrink-0", active ? "text-emerald-400" : "")} />
+                      <Icon className="size-4 shrink-0"
+                            style={{ color: active ? "oklch(0.70 0.14 155)" : undefined }} />
                       {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
-                      {!collapsed && active && <span className="size-1.5 rounded-full bg-emerald-400 shrink-0" />}
+                      {!collapsed && active && (
+                        <span className="size-1.5 rounded-full shrink-0"
+                              style={{ background: "oklch(0.70 0.14 155)" }} />
+                      )}
                     </Link>
                   )
                 })}
               </div>
-              {collapsed && <div className="my-2 h-px bg-zinc-800/50" />}
+              {collapsed && (
+                <div className="my-2 h-px" style={{ background: "oklch(0.25 0.05 155 / 50%)" }} />
+              )}
             </div>
           )
         })}
       </nav>
 
       {/* ── User card ────────────────────────────────────────── */}
-      <div className={cn("border-t border-zinc-800/50 flex-shrink-0", collapsed ? "p-2" : "px-3 pb-4 pt-2")}>
+      <div
+        className={cn("flex-shrink-0", collapsed ? "p-2" : "px-3 pb-4 pt-2")}
+        style={{ borderTop: "1px solid oklch(0.25 0.05 155 / 50%)" }}
+      >
         {collapsed ? (
-          /* Collapsed: just initials button */
           <div className="flex flex-col items-center gap-2">
             <div
-              className="size-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center"
+              className="size-8 rounded-lg flex items-center justify-center"
               title={userName ?? "Usuário"}
+              style={{ background: "oklch(0.45 0.13 155 / 30%)", border: "1px solid oklch(0.55 0.13 155 / 40%)" }}
             >
-              <span className="text-xs font-bold text-emerald-400">{initials}</span>
+              <span className="text-xs font-bold" style={{ color: "oklch(0.70 0.14 155)" }}>{initials}</span>
             </div>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               title="Sair"
-              className="size-7 flex items-center justify-center rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="size-7 flex items-center justify-center rounded-lg transition-colors"
+              style={{ color: "oklch(0.42 0.05 155)" }}
             >
               <LogOut className="size-3.5" />
             </button>
           </div>
         ) : (
-          <div className="rounded-xl bg-zinc-900 border border-zinc-800/60 p-3">
+          <div className="rounded-xl p-3"
+               style={{ background: "oklch(0.21 0.05 155 / 70%)", border: "1px solid oklch(0.28 0.06 155 / 60%)" }}>
             <div className="flex items-center gap-3 mb-3">
-              <div className="size-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                <span className="text-xs font-bold text-emerald-400">{initials}</span>
+              <div className="size-8 rounded-lg flex items-center justify-center shrink-0"
+                   style={{ background: "oklch(0.45 0.13 155 / 30%)", border: "1px solid oklch(0.55 0.13 155 / 40%)" }}>
+                <span className="text-xs font-bold" style={{ color: "oklch(0.70 0.14 155)" }}>{initials}</span>
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-white truncate leading-tight">
+                <p className="text-sm font-semibold truncate leading-tight"
+                   style={{ color: "oklch(0.90 0.012 80)" }}>
                   {userName ?? "Usuário"}
                 </p>
-                <p className="text-[11px] text-zinc-500 leading-tight">
+                <p className="text-[11px] leading-tight" style={{ color: "oklch(0.45 0.05 155)" }}>
                   {ROLE_LABELS[userRole] ?? userRole}
                 </p>
               </div>
             </div>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
-              className="flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
+              style={{ color: "oklch(0.42 0.05 155)" }}
             >
               <LogOut className="size-3.5 shrink-0" />
               Encerrar sessão
@@ -195,9 +227,10 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
         onClick={toggle}
         title={collapsed ? "Expandir menu" : "Recolher menu"}
         className={cn(
-          "flex items-center justify-center h-9 border-t border-zinc-800/50 text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/40 transition-colors flex-shrink-0",
+          "flex items-center justify-center h-9 transition-colors flex-shrink-0",
           collapsed ? "w-full" : "w-full gap-2 text-xs"
         )}
+        style={{ borderTop: "1px solid oklch(0.25 0.05 155 / 50%)", color: "oklch(0.38 0.05 155)" }}
       >
         {collapsed
           ? <ChevronRight className="size-3.5" />
