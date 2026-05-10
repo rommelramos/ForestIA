@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, Map,
   FolderKanban, Building2,
   LogOut, Database, Settings, TreePine,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, UserCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -37,10 +37,16 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Administração",
     items: [
-      { label: "Usuários",               href: "/dashboard/users",           icon: Users,     roles: ["admin","gerente"] },
-      { label: "Solicitações de Acesso", href: "/dashboard/access-requests", icon: Building2, roles: ["admin"] },
-      { label: "Banco de Dados",         href: "/setup/db",                  icon: Database,  roles: ["admin"] },
-      { label: "Log de Auditoria",       href: "/dashboard/audit-log",       icon: Settings,  roles: ["admin"] },
+      { label: "Usuários",               href: "/dashboard/users",           icon: Users,       roles: ["admin","gerente"] },
+      { label: "Solicitações de Acesso", href: "/dashboard/access-requests", icon: Building2,   roles: ["admin"] },
+      { label: "Banco de Dados",         href: "/setup/db",                  icon: Database,    roles: ["admin"] },
+      { label: "Log de Auditoria",       href: "/dashboard/audit-log",       icon: Settings,    roles: ["admin"] },
+    ],
+  },
+  {
+    title: "Conta",
+    items: [
+      { label: "Meu Perfil", href: "/dashboard/profile", icon: UserCircle, roles: ["admin","gerente","funcionario","cliente"] },
     ],
   },
 ]
@@ -195,7 +201,11 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
         ) : (
           <div className="rounded-xl p-3"
                style={{ background: "oklch(0.21 0.05 155 / 70%)", border: "1px solid oklch(0.28 0.06 155 / 60%)" }}>
-            <div className="flex items-center gap-3 mb-3">
+            <Link
+              href="/dashboard/profile"
+              onClick={onNavigate}
+              className="flex items-center gap-3 mb-3 rounded-lg hover:bg-white/5 transition-colors -mx-1 px-1 py-0.5"
+            >
               <div className="size-8 rounded-lg flex items-center justify-center shrink-0"
                    style={{ background: "oklch(0.45 0.13 155 / 30%)", border: "1px solid oklch(0.55 0.13 155 / 40%)" }}>
                 <span className="text-xs font-bold" style={{ color: "oklch(0.70 0.14 155)" }}>{initials}</span>
@@ -209,7 +219,7 @@ export function Sidebar({ userRole, userName, onNavigate }: SidebarProps) {
                   {ROLE_LABELS[userRole] ?? userRole}
                 </p>
               </div>
-            </div>
+            </Link>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               className="flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors"

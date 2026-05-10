@@ -86,6 +86,7 @@ export default async function UsersPage() {
                   <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Perfil</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Status</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Criado em</th>
+                  <th className="px-5 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
@@ -114,6 +115,14 @@ export default async function UsersPage() {
                     </td>
                     <td className="px-5 py-3.5 text-zinc-400 text-xs">
                       {new Date(u.createdAt).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <Link
+                        href={`/dashboard/users/${u.id}`}
+                        className="text-xs text-emerald-600 hover:text-emerald-800 font-medium transition-colors"
+                      >
+                        Editar
+                      </Link>
                     </td>
                   </tr>
                 ))}

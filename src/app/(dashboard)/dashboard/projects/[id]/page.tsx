@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StageBoard } from "@/modules/projects"
+import { MembersPanel } from "@/modules/projects/components/MembersPanel"
 import { cn } from "@/lib/utils"
 import { MapPin, Calendar, Layers, Users } from "lucide-react"
 
@@ -31,14 +32,20 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const [project] = await db.select().from(projects).where(eq(projects.id, Number(id))).limit(1)
   if (!project) notFound()
 
-  const stages = await db.select().from(projectStages)
-    .where(eq(projectStages.projectId, Number(id))).orderBy(projectStages.order)
-
-  const members = await db
-    .select({ id: projectMembers.id, role: projectMembers.role, name: users.name, email: users.email })
-    .from(projectMembers)
-    .leftJoin(users, eq(projectMembers.userId, users.id))
-    .where(eq(projectMembers.projectId, Number(id)))
+  const [stages, members, allUsers] = await Promise.all([
+    db.select().from(projectStages)
+      .where(eq(projectStages.projectId, Number(id))).orderBy(projectStages.order),
+    db.select({
+        id: projectMembers.id, userId: projectMembers.userId,
+        role: projectMembers.role, name: users.name, email: users.email,
+      })
+      .from(projectMembers)
+      .leftJoin(users, eq(projectMembers.userId, users.id))
+      .where(eq(projectMembers.projectId, Number(id))),
+    db.select({ id: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.isActive, true)),
+  ])
 
   const canEdit = ["admin", "gerente"].includes(session.user.role)
   const canManageStages = ["admin", "gerente", "funcionario"].includes(session.user.role)
@@ -106,16 +113,32 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
                 <Users className="size-4" /> Equipe ({members.length})
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
-              {members.length === 0
-                ? <p className="text-sm text-gray-400">Sem membros.</p>
-                : members.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between text-sm">
-                    <span className="font-medium">{m.name ?? m.email}</span>
-                    <Badge variant="outline" className="text-xs">{m.role}</Badge>
-                  </div>
-                ))
-              }
+            <CardContent>
+              {canEdit ? (
+                <MembersPanel
+                  projectId={Number(id)}
+                  initialMembers={members.map(m => ({
+                    id: m.id,
+                    userId: m.userId,
+                    name: m.name ?? null,
+                    email: m.email ?? null,
+                    role: m.role,
+                  }))}
+                  allUsers={allUsers}
+                />
+              ) : (
+                <div className="space-y-2">
+                  {members.length === 0
+                    ? <p className="text-sm text-gray-400">Sem membros.</p>
+                    : members.map(m => (
+                      <div key={m.id} className="flex items-center justify-between text-sm">
+                        <span className="font-medium">{m.name ?? m.email}</span>
+                        <Badge variant="outline" className="text-xs">{m.role}</Badge>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
             </CardContent>
           </Card>
 
