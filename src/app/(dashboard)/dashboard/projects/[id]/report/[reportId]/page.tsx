@@ -1,8 +1,8 @@
 import { auth } from "../../../../../../../../auth"
 import { redirect, notFound } from "next/navigation"
 import { getDb } from "@/lib/db/drizzle"
-import { viabilityReports } from "@/lib/db/schema"
-import { eq } from "drizzle-orm"
+import { viabilityReports, geospatialSources } from "@/lib/db/schema"
+import { asc, eq } from "drizzle-orm"
 import { ReportEditor } from "@/modules/reports/components/ReportEditor"
 
 export const dynamic = "force-dynamic"
@@ -18,19 +18,22 @@ export default async function ReportDetailPage({
   const { reportId } = await params
   const db = getDb()
 
-  const [report] = await db
-    .select()
-    .from(viabilityReports)
-    .where(eq(viabilityReports.id, Number(reportId)))
-    .limit(1)
+  const [[report], sources] = await Promise.all([
+    db.select().from(viabilityReports).where(eq(viabilityReports.id, Number(reportId))).limit(1),
+    db.select({ id: geospatialSources.id, name: geospatialSources.name, organization: geospatialSources.organization, thematicCategory: geospatialSources.thematicCategory })
+      .from(geospatialSources)
+      .where(eq(geospatialSources.isActive, true))
+      .orderBy(asc(geospatialSources.thematicCategory), asc(geospatialSources.name)),
+  ])
+
   if (!report) notFound()
 
-  const canEdit = ["admin", "gerente", "funcionario"].includes(session.user.role)
-  if (!canEdit) redirect("/dashboard")
+  if (!["admin", "gerente", "funcionario"].includes(session.user.role)) redirect("/dashboard")
 
   return (
     <div className="h-full overflow-auto p-6">
       <ReportEditor
+        sources={sources}
         report={{
           ...report,
           geospatialScore: report.geospatialScore ? String(report.geospatialScore) : null,
