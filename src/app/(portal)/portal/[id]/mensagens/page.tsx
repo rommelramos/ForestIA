@@ -5,6 +5,7 @@ import { projects, projectMembers, projectMessages, users } from "@/lib/db/schem
 import { eq, and, count, asc } from "drizzle-orm"
 import { PortalTabs } from "@/components/portal/PortalTabs"
 import { MessageThreadView } from "@/components/portal/MessageThreadView"
+import Link from "next/link"
 
 export const dynamic = "force-dynamic"
 
@@ -60,9 +61,9 @@ export default async function PortalMensagensPage({ params }: { params: Promise<
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm" style={{ color: "oklch(0.58 0.05 155)" }}>
-        <a href="/portal" className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>Projetos</a>
+        <Link href="/portal" className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>Projetos</Link>
         <span>/</span>
-        <a href={`/portal/${projectId}`} className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>{project.name}</a>
+        <Link href={`/portal/${projectId}`} className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>{project.name}</Link>
         <span>/</span>
         <span style={{ color: "oklch(0.25 0.05 155)" }}>Mensagens</span>
       </div>

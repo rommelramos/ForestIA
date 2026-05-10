@@ -4,7 +4,7 @@ import { getDb } from "@/lib/db/drizzle"
 import {
   projects, projectMembers, projectWorkflowSteps, projectMessages, viabilityReports,
 } from "@/lib/db/schema"
-import { eq, inArray, and, count } from "drizzle-orm"
+import { eq, and, count } from "drizzle-orm"
 import { PortalTabs } from "@/components/portal/PortalTabs"
 import { MapPin, Ruler, Calendar, CheckCircle2, Circle, Clock, AlertCircle, FileText } from "lucide-react"
 import Link from "next/link"

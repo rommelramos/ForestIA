@@ -5,6 +5,7 @@ import { projects, projectMembers, viabilityReports, projectMessages } from "@/l
 import { eq, and, count } from "drizzle-orm"
 import { PortalTabs } from "@/components/portal/PortalTabs"
 import { FileText, Lock, TrendingUp } from "lucide-react"
+import Link from "next/link"
 
 export const dynamic = "force-dynamic"
 
@@ -55,9 +56,9 @@ export default async function PortalRelatorioPage({ params }: { params: Promise<
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm" style={{ color: "oklch(0.58 0.05 155)" }}>
-        <a href="/portal" className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>Projetos</a>
+        <Link href="/portal" className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>Projetos</Link>
         <span>/</span>
-        <a href={`/portal/${projectId}`} className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>{project.name}</a>
+        <Link href={`/portal/${projectId}`} className="hover:underline" style={{ color: "oklch(0.45 0.10 155)" }}>{project.name}</Link>
         <span>/</span>
         <span style={{ color: "oklch(0.25 0.05 155)" }}>Relatório</span>
       </div>
@@ -84,7 +85,6 @@ export default async function PortalRelatorioPage({ params }: { params: Promise<
       ) : (
         <div className="space-y-4">
           {reports.map(report => {
-            const content = report.content as Record<string, unknown> | null
 
             return (
               <div key={report.id} className="rounded-2xl overflow-hidden"
