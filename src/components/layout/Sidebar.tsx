@@ -23,15 +23,15 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Principal",
     items: [
-      { label: "Início",   href: "/dashboard",          icon: LayoutDashboard, roles: ["admin","gerente","funcionario","cliente"] },
-      { label: "Projetos", href: "/dashboard/projects",  icon: FolderKanban,    roles: ["admin","gerente","funcionario","cliente"] },
+      { label: "Início",   href: "/dashboard",         icon: LayoutDashboard, roles: ["admin","gerente","funcionario"] },
+      { label: "Projetos", href: "/dashboard/projects", icon: FolderKanban,    roles: ["admin","gerente","funcionario"] },
     ],
   },
   {
     title: "Ferramentas",
     items: [
       { label: "Bases Geoespaciais", href: "/dashboard/geospatial-sources", icon: Map,       roles: ["admin","gerente","funcionario"] },
-      { label: "Portal Cliente",     href: "/dashboard/client-portal",       icon: Building2, roles: ["cliente"] },
+      { label: "Portal Cliente",     href: "/portal",                        icon: Building2, roles: ["admin","gerente"] },
     ],
   },
   {

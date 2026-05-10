@@ -22,6 +22,16 @@ export const authConfig: NextAuthConfig = {
       if (!isLoggedIn) return false
       if (role === "pending") return Response.redirect(new URL("/login?error=PendingApproval", nextUrl))
 
+      // Clientes só acessam /portal — redirecionar qualquer rota /dashboard para /portal
+      if (role === "cliente" && pathname.startsWith("/dashboard")) {
+        return Response.redirect(new URL("/portal", nextUrl))
+      }
+
+      // Engenheiros/admins não acessam /portal — redirecionar para /dashboard
+      if (role !== "cliente" && pathname.startsWith("/portal")) {
+        return Response.redirect(new URL("/dashboard", nextUrl))
+      }
+
       const ADMIN_ONLY = ["/dashboard/admin", "/dashboard/audit-log", "/dashboard/access-requests"]
       if (ADMIN_ONLY.some((p) => pathname.startsWith(p)) && role !== "admin") {
         return Response.redirect(new URL("/dashboard", nextUrl))

@@ -280,3 +280,36 @@ export const projectWorkflowSteps = mysqlTable("project_workflow_steps", {
   completedAt: timestamp("completed_at"),
   updatedBy: varchar("updated_by", { length: 255 }).references(() => users.id),
 })
+
+// ─── Mensagens do projeto (Q&A cliente ↔ engenheiro) ─────────────────────────
+
+export const projectMessages = mysqlTable("project_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  authorId: varchar("author_id", { length: 255 }).notNull().references(() => users.id),
+  /** null = mensagem geral do projeto; preenchido = resposta a outra mensagem */
+  parentId: int("parent_id"),
+  body: text("body").notNull(),
+  /** 'question' | 'answer' | 'note' */
+  kind: varchar("kind", { length: 30 }).notNull().default("note"),
+  isReadByClient: boolean("is_read_by_client").notNull().default(false),
+  isReadByTeam: boolean("is_read_by_team").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+})
+
+// ─── Documentos do projeto (uploads cliente + engenheiro) ────────────────────
+
+export const projectDocuments = mysqlTable("project_documents", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  uploadedBy: varchar("uploaded_by", { length: 255 }).notNull().references(() => users.id),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  url: text("url").notNull(),
+  mimeType: varchar("mime_type", { length: 100 }),
+  sizeBytes: int("size_bytes"),
+  /** 'client_upload' | 'engineer_upload' | 'report' | 'contract' */
+  category: varchar("category", { length: 50 }).notNull().default("client_upload"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+})
