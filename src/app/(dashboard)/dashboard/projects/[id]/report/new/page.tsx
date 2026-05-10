@@ -2,7 +2,7 @@ import { auth } from "../../../../../../../../auth"
 import { redirect, notFound } from "next/navigation"
 import { getDb } from "@/lib/db/drizzle"
 import { projects, aoiAnalyses } from "@/lib/db/schema"
-import { eq } from "drizzle-orm"
+import { and, eq, ne } from "drizzle-orm"
 import { NewReportForm } from "@/modules/reports/components/NewReportForm"
 
 export const dynamic = "force-dynamic"
@@ -23,10 +23,11 @@ export default async function NewReportPage({ params }: { params: Promise<{ id: 
     .limit(1)
   if (!project) notFound()
 
+  // Exclude working reference layers (sourceType='layer') — same filter as OverlapsList
   const analyses = await db
     .select({ id: aoiAnalyses.id, name: aoiAnalyses.name, notes: aoiAnalyses.notes, sourceType: aoiAnalyses.sourceType, geojson: aoiAnalyses.geojson })
     .from(aoiAnalyses)
-    .where(eq(aoiAnalyses.projectId, Number(id)))
+    .where(and(eq(aoiAnalyses.projectId, Number(id)), ne(aoiAnalyses.sourceType, "layer")))
 
   return (
     <div className="h-full overflow-auto p-6">

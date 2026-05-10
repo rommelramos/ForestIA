@@ -170,9 +170,6 @@ export function NewReportForm({ project, analyses }: Props) {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-medium text-gray-900">{r.name}</span>
-                          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                            {r.features} feição{r.features !== 1 ? "ões" : ""}
-                          </span>
                           <span className="text-xs text-gray-400">{SOURCE_LABELS[r.sourceType] ?? r.sourceType}</span>
                         </div>
                         {r.notes && !isOpen && (
