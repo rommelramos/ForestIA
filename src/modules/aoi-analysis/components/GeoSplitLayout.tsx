@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import Link from "next/link"
 import { GeospatialMapClient } from "./GeospatialMapClient"
 import { OverlapsList } from "./OverlapsList"
 
@@ -108,14 +109,26 @@ export function GeoSplitLayout({ projectId, canManage }: Props) {
               <span className="text-xs font-semibold tracking-wide">🗂️ Sobreposições salvas</span>
             </div>
 
-            <button
-              onMouseDown={e => e.stopPropagation()}
-              onClick={toggle}
-              title={minimized ? "Expandir" : "Minimizar"}
-              className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors text-white text-sm"
-            >
-              {minimized ? "□" : "─"}
-            </button>
+            <div className="flex items-center gap-1">
+              {canManage && (
+                <Link
+                  href={`/dashboard/projects/${projectId}/report/new`}
+                  onMouseDown={e => e.stopPropagation()}
+                  title="Criar Relatório de Viabilidade"
+                  className="text-[10px] px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 transition-colors text-white font-medium whitespace-nowrap"
+                >
+                  + Relatório
+                </Link>
+              )}
+              <button
+                onMouseDown={e => e.stopPropagation()}
+                onClick={toggle}
+                title={minimized ? "Expandir" : "Minimizar"}
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-white/20 transition-colors text-white text-sm"
+              >
+                {minimized ? "□" : "─"}
+              </button>
+            </div>
           </div>
 
           {/* Content */}
