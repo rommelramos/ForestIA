@@ -127,7 +127,7 @@ export default function Home() {
       {/* ── Footer ──────────────────────────────────────────────── */}
       <footer className="relative z-10 pb-8 text-center">
         <p className="text-[11px]" style={{ color: "oklch(0.40 0.04 155)" }}>
-          UFPA · Gestão Florestal · {new Date().getFullYear()}
+          GreenForest · {new Date().getFullYear()}
         </p>
       </footer>
     </div>

@@ -86,7 +86,7 @@ export default function LoginPage() {
 
         {/* Bottom caption */}
         <p className="relative z-10 text-[11px]" style={{ color: "oklch(0.35 0.04 155)" }}>
-          UFPA · Engenharia Florestal · {new Date().getFullYear()}
+          GreenForest · {new Date().getFullYear()}
         </p>
       </div>
 
